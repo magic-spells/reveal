@@ -370,8 +370,8 @@
           crossed: false,
           armed: false,
           done: false,
-          // null until the first evaluation decides; the answer cannot change
-          // for the life of these observers
+          // null until an evaluation decides; refresh() sets it back to null so
+          // an ancestor that becomes scrollable later is picked up
           painted: null,
           margin: null,
           height: 0,
@@ -588,8 +588,9 @@
 
       // Decided before the first measurement: which geometry an element inside a
       // scrolling container gets is not a detail the measurement can discover.
-      // Once, not once per refresh - the walk costs a computed style per ancestor,
-      // and a refresh cannot move an element. A rebuild starts from fresh state.
+      // Kept, because this runs per wake-up - the walk costs a computed style per
+      // ancestor and an un-armed element can be woken every frame. refresh() and
+      // a rebuild both clear it, so a layout change still gets a fresh answer.
       if (state.painted === null) {
         state.painted = hasScrollableAncestor(element);
       }
@@ -659,6 +660,11 @@
      * measurement contains it, and excludes the element's own finished one.
      */
     #settle(element, state) {
+      // A consumer's onCross callback can destroy the instance, and control comes
+      // straight back here. `finish` bails on a destroyed instance, so starting a
+      // wait now would put listeners on that nothing ever takes back off.
+      if (this.#isDestroyed) return;
+
       this.#cancelSettle(state);
 
       state.settling = true;
@@ -682,7 +688,11 @@
         if (state.done) this.#states.delete(element);
       };
 
-      state.cancelSettle = whenSettled(element, finish);
+      // null means there was no transition to wait for and `finish` already ran,
+      // so there is nothing to cancel - and storing it would clobber whatever a
+      // re-entrant settle put there in the meantime
+      const cancel = whenSettled(element, finish);
+      if (cancel) state.cancelSettle = cancel;
     }
 
     #cancelSettle(state) {
@@ -844,6 +854,12 @@
         if (state.done) return;
         state.armed = false;
         state.margin = null;
+        // Re-detected here, not per wake-up: an ancestor can become
+        // `overflow:auto` after init - a breakpoint, a class toggle - and an
+        // element left on stale `painted: false` has every wake-up denied.
+        // refresh() is debounced or consumer-called, so the walk is affordable
+        // here in a way it is not on the per-frame path.
+        state.painted = null;
       });
 
       this.#build();
