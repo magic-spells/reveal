@@ -364,6 +364,147 @@ describe("reveal against a stubbed IntersectionObserver", () => {
   });
 });
 
+const delay = (element) => element.style.getPropertyValue("--reveal-delay");
+
+/** Let the current batch close, the way the next task would */
+const nextWave = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+describe("stagger groups", () => {
+  beforeEach(() => {
+    FakeObserver.instances = [];
+    globalThis.IntersectionObserver = FakeObserver;
+    window.innerHeight = 800;
+    setScroll(0);
+    document.documentElement.className = "";
+    document.documentElement.removeAttribute("style");
+    document.body.innerHTML = "";
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    Reveal.destroy();
+    vi.restoreAllMocks();
+  });
+
+  /** Three elements, all crossing at once, in one group */
+  const row = (attributes, top = 200) => {
+    document.body.innerHTML = ["a", "b", "c"]
+      .map(
+        (id) =>
+          `<div id="${id}" class="reveal reveal-fade-up" ${attributes(id)}></div>`,
+      )
+      .join("");
+    const elements = ["a", "b", "c"].map((id) => document.getElementById(id));
+    elements.forEach((element) => place(element, { top }));
+    return elements;
+  };
+
+  it("hands a batch 0, step, 2 x step in DOM order", () => {
+    const [a, b, c] = row(() => `data-reveal-group="row:50"`);
+
+    Reveal.init({ offset: 120 });
+
+    expect([a, b, c].every(revealed)).toBe(true);
+    expect([delay(a), delay(b), delay(c)]).toEqual(["0ms", "50ms", "100ms"]);
+  });
+
+  it("cascades a batch that arrives out of order in DOM order", () => {
+    const [a, b, c] = row(() => `data-reveal-group="row:50"`, 5000);
+
+    Reveal.init({ offset: 120 });
+    expect([a, b, c].some(revealed)).toBe(false);
+
+    [a, b, c].forEach((element) => place(element, { top: 100 }));
+    FakeObserver.watching(a)[0].fire([c, a, b]);
+
+    expect([delay(a), delay(b), delay(c)]).toEqual(["0ms", "50ms", "100ms"]);
+  });
+
+  it("restarts from zero on the next wave", async () => {
+    const [a, b, c] = row(() => `data-reveal-group="row:50"`, 5000);
+    place(a, { top: 200 });
+
+    Reveal.init({ offset: 120 });
+    expect(delay(a)).toBe("0ms");
+
+    await nextWave();
+
+    place(b, { top: 100 });
+    place(c, { top: 100 });
+    FakeObserver.watching(b)[0].fire([b, c]);
+
+    expect([delay(b), delay(c)]).toEqual(["0ms", "50ms"]);
+  });
+
+  it("takes the step from the first member that declares one", () => {
+    const [a, b, c] = row((id) =>
+      id === "a"
+        ? `data-reveal-group="row"`
+        : `data-reveal-group="row:${id === "b" ? 80 : 200}"`,
+    );
+
+    Reveal.init({ offset: 120 });
+
+    expect([delay(a), delay(b), delay(c)]).toEqual(["0ms", "80ms", "160ms"]);
+  });
+
+  it("leaves timing alone when no member declares a step", () => {
+    const [a, b, c] = row(() => `data-reveal-group="row"`);
+
+    Reveal.init({ offset: 120 });
+
+    expect([a, b, c].every(revealed)).toBe(true);
+    expect([delay(a), delay(b), delay(c)]).toEqual(["", "", ""]);
+  });
+
+  it("cascades an anchor group off one crossing", () => {
+    document.body.innerHTML = `
+      <div id="band"></div>
+      <div id="a" class="reveal reveal-fade-up" data-reveal-anchor="#band" data-reveal-group="cards:50"></div>
+      <div id="b" class="reveal reveal-fade-up" data-reveal-anchor="#band" data-reveal-group="cards:50"></div>
+      <div id="c" class="reveal reveal-fade-up" data-reveal-anchor="#band" data-reveal-group="cards:50"></div>`;
+    const band = document.getElementById("band");
+    const elements = ["a", "b", "c"].map((id) => document.getElementById(id));
+    [band, ...elements].forEach((element) => place(element, { top: 200 }));
+
+    Reveal.init({ offset: 120 });
+
+    expect(elements.every(revealed)).toBe(true);
+    expect(elements.map(delay)).toEqual(["0ms", "50ms", "100ms"]);
+  });
+
+  it("drops the delay again on the way out, so hiding is immediate", () => {
+    const [a, b] = row(
+      () => `data-reveal-group="row:50" data-reveal-once="false"`,
+    );
+
+    Reveal.init({ offset: 120 });
+    expect(delay(b)).toBe("50ms");
+
+    place(a, { top: 5000 });
+    place(b, { top: 5000 });
+    FakeObserver.watching(b).forEach((observer) =>
+      observer.fire([a, b], false),
+    );
+
+    expect(revealed(b)).toBe(false);
+    expect(delay(b)).toBe("");
+  });
+
+  it("keeps staggering the rest when one group value is unusable", () => {
+    const [a, b, c] = row((id) =>
+      id === "a" ? `data-reveal-group=":50"` : `data-reveal-group="row:50"`,
+    );
+
+    Reveal.init({ offset: 120 });
+
+    expect([a, b, c].every(revealed)).toBe(true);
+    // the nameless one is simply not in a group
+    expect(delay(a)).toBe("");
+    expect([delay(b), delay(c)]).toEqual(["0ms", "50ms"]);
+  });
+});
+
 const off = () => document.documentElement.classList.contains("reveal-off");
 
 describe("the reveal-off escape hatch", () => {
