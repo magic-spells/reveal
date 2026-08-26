@@ -56,11 +56,11 @@
 
         /* Text ramp, measured on --bg-card #100e18, the darkest surface any
 				   of these sit on: cream 16.2:1 · cream-dim 11.9:1 · text 13.1:1 ·
-				   text-dim 8.4:1 · iris 7.6:1. */
+				   text-dim 10.3:1 · iris 7.6:1. */
         --cream: #f6f3fb;
         --cream-dim: #d5cfe4;
         --text: #e4dff0;
-        --text-dim: #b6afc7;
+        --text-dim: #c2bbd3;
 
         --font-display: "Cormorant Garamond", Georgia, serif;
         --font-body: "Outfit", system-ui, sans-serif;
@@ -89,7 +89,8 @@
         color: var(--text);
         background: var(--bg-deep);
         font-family: var(--font-body);
-        font-weight: 300;
+        font-size: 17px;
+        font-weight: 400;
         overflow-x: hidden;
         -webkit-font-smoothing: antialiased;
       }
@@ -881,12 +882,12 @@
         </div>
       </div>
 
-      <div class="code reveal reveal-fade-up reveal-delay-500">
-        <span>// app.js — no pre-paint snippet, no head tag</span>
-        import Reveal from <b>'@magic-spells/reveal'</b>; import
-        <b>'@magic-spells/reveal/css'</b>; Reveal.<b>init</b>({ offset: 120,
-        once: true });
-      </div>
+      <pre class="code reveal reveal-fade-up reveal-delay-500">
+<span>// app.js — no pre-paint snippet, no head tag</span>
+import Reveal from <b>'@magic-spells/reveal'</b>;
+import <b>'@magic-spells/reveal/css'</b>;
+
+Reveal.<b>init</b>({ offset: 120, once: true });</pre>
 
       <div class="hero-scroll reveal reveal-fade reveal-delay-600">scroll</div>
     </header>
@@ -897,7 +898,7 @@
           <div class="demo-header">
             <div class="demo-tags">
               <span class="demo-tag">the whole api</span>
-              <span class="demo-tag">classes + four attributes</span>
+              <span class="demo-tag">classes + five attributes</span>
             </div>
             <h2 class="reveal reveal-fade-up">Everything you can write</h2>
             <p class="demo-desc reveal reveal-fade-up reveal-delay-100">
@@ -1019,17 +1020,23 @@
                     <code>top-bottom</code>, <code>center-center</code>, etc.
                   </td>
                 </tr>
+                <tr>
+                  <td><code>data-reveal-group</code></td>
+                  <td><code>name:step-ms</code></td>
+                  <td>
+                    Auto-staggered delays — each reveal wave cascades from 0 in
+                    steps of <code>step-ms</code>.
+                  </td>
+                </tr>
               </tbody>
             </table>
           </div>
 
-          <div class="code reveal reveal-fade-up reveal-delay-200">
-            &lt;div class="<b
-              >reveal reveal-fade-up reveal-delay-150 reveal-duration-800
-              reveal-ease-spring</b
-            >" <b>data-reveal-offset</b>="20%"
-            <b>data-reveal-once</b>="false"&gt; … &lt;/div&gt;
-          </div>
+          <pre class="code reveal reveal-fade-up reveal-delay-200">
+&lt;div class="<b>reveal reveal-fade-up reveal-delay-150 reveal-duration-800 reveal-ease-spring</b>"
+     <b>data-reveal-offset</b>="20%" <b>data-reveal-once</b>="false"&gt;
+  …
+&lt;/div&gt;</pre>
         </div>
       </section>
 
@@ -1302,16 +1309,12 @@
             ></span>
           </div>
 
-          <div class="code">
-            <span>&lt;div class="grid" <b>id="cascade"</b>&gt;</span>
-            &lt;span class="<b>reveal reveal-zoom-in</b>"
-            <b>data-reveal-anchor</b>="#cascade"&gt;&lt;/span&gt; &lt;span
-            class="<b>reveal reveal-zoom-in reveal-delay-50</b>"
-            <b>data-reveal-anchor</b>="#cascade"&gt;&lt;/span&gt; &lt;span
-            class="<b>reveal reveal-zoom-in reveal-delay-100</b>"
-            <b>data-reveal-anchor</b>="#cascade"&gt;&lt;/span&gt;
-            <span>&lt;/div&gt;</span>
-          </div>
+          <pre class="code">
+<span>&lt;div class="grid" <b>id="cascade"</b>&gt;</span>
+  &lt;span class="<b>reveal reveal-zoom-in</b>" <b>data-reveal-anchor</b>="#cascade"&gt;&lt;/span&gt;
+  &lt;span class="<b>reveal reveal-zoom-in reveal-delay-50</b>" <b>data-reveal-anchor</b>="#cascade"&gt;&lt;/span&gt;
+  &lt;span class="<b>reveal reveal-zoom-in reveal-delay-100</b>" <b>data-reveal-anchor</b>="#cascade"&gt;&lt;/span&gt;
+<span>&lt;/div&gt;</span></pre>
         </div>
       </section>
 
@@ -1442,11 +1445,9 @@
             </div>
           </div>
 
-          <div class="code">
-            <span>&lt;!-- in a loop — no index in sight --&gt;</span>
-            &lt;div class="<b>reveal reveal-fade-up</b>"
-            <b>data-reveal-group</b>="demo-list:50"&gt;…&lt;/div&gt;
-          </div>
+          <pre class="code">
+<span>&lt;!-- in a loop — no index in sight --&gt;</span>
+&lt;div class="<b>reveal reveal-fade-up</b>" <b>data-reveal-group</b>="demo-list:50"&gt;…&lt;/div&gt;</pre>
         </div>
       </section>
 
