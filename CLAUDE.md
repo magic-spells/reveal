@@ -4,7 +4,7 @@ Class-driven scroll reveals. The JS decides *when* an element has arrived; the C
 what that looks like. Nothing is animated from JavaScript. Styling is classes (`reveal`
 marker + `reveal-<effect>` + timing classes, each timing class one custom property);
 data attributes are behavior only (`data-reveal-anchor`, `-once`, `-offset`,
-`-anchor-placement`).
+`-anchor-placement`, `-group`).
 
 ## Commands
 
