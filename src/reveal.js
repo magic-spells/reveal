@@ -67,6 +67,13 @@ class RevealController {
   #settles = new Map();
   #groupNames = new Map();
   #groupSteps = new Map();
+  // Whose inline delay the controller wrote, and *which group* wrote it. It
+  // outlives a rebuild - and a destroy() - exactly as the value it describes
+  // does, so the controller only ever removes a delay it put there itself, and
+  // only while the element is still in the group that put it there. Whether an
+  // element is *revealed* is not tracked here: that lives in the class, where
+  // anything can see it.
+  #staggered = new WeakMap();
   #wave = new Map();
   #waveTimer = null;
   #initialized = false;
@@ -163,10 +170,22 @@ class RevealController {
    * visible on its way to re-arming - so it uses this instead of destroy().
    */
   #teardown() {
+    // First, because finishing the settles below writes a class, and a
+    // consumer reacting to that synchronously must not be able to rebuild into
+    // the teardown that is still running - refresh() and refreshHard() both
+    // check this flag
+    this.#initialized = false;
+
     this.#teardownObservers();
     this.#groups = [];
 
-    this.#settles.forEach((cancel) => cancel());
+    // A settle in flight is a debt: `reveal-done` is what hands the element's
+    // own transitions back, and nothing is left running to pay it afterwards.
+    // Dropping it would leave the library's transition shorthand overriding
+    // them for the life of the page - so teardown finishes what it started
+    // rather than abandoning it. `finish` cancels its own wait on the way
+    // through, so the settles do not need cancelling as well.
+    this.#settles.forEach((settle) => settle.finish());
     this.#settles.clear();
 
     // Inline delays are left where they are, the way `is-revealed` is: they
@@ -182,7 +201,6 @@ class RevealController {
     }
 
     this.#unwatchReducedMotion();
-    this.#initialized = false;
     this.#disabled = false;
     this.#rebuilding = false;
     this.#rebuildDirty = false;
@@ -197,6 +215,11 @@ class RevealController {
    * swap #groups out from under the loop still building into it, orphaning
    * every observer created after that point, so nested calls just mark the
    * pass dirty and let the outer one run again.
+   *
+   * A rebuild also ends the open wave. Fresh observers announce the whole page
+   * from "not crossed", which is a new arrival as far as the stagger is
+   * concerned - so the count has to start over, or content appended just after
+   * a cascade would wait out a delay for members that are already on screen.
    */
   #rebuild() {
     if (this.#rebuilding) {
@@ -206,6 +229,7 @@ class RevealController {
 
     this.#rebuilding = true;
     try {
+      this.#endWave();
       this.#teardownObservers();
       this.#collect();
       this.#arm();
@@ -414,9 +438,11 @@ class RevealController {
    * order the members appear in is exactly what can change.
    */
   #registerGroup(element) {
-    const group = parseGroup(element.getAttribute("data-reveal-group"));
+    const raw = element.getAttribute("data-reveal-group");
+    const group = parseGroup(raw);
     if (!group) return;
 
+    this.#warnOnRejectedStep(raw, group, element);
     this.#groupNames.set(element, group.name);
 
     if (group.step !== null && !this.#groupSteps.has(group.name)) {
@@ -425,13 +451,40 @@ class RevealController {
   }
 
   /**
+   * Say so when a step was meant and not read
+   *
+   * A tail the parser will not take as a step stays part of the name, which is
+   * the right answer for `cards:hero` and a silent fork of the group for
+   * `cards:-50`. Nothing about the result shows the difference, so a tail that
+   * reads as a number and still failed is worth a word - the same courtesy
+   * `#readOffset` extends to an unusable offset.
+   */
+  #warnOnRejectedStep(raw, group, element) {
+    if (group.step !== null || group.name !== String(raw).trim()) return;
+
+    const split = group.name.lastIndexOf(":");
+    // No colon is no attempt at a step - `data-reveal-group="50"` is a group
+    // whose name happens to be a number
+    if (split === -1) return;
+
+    const tail = group.name.slice(split + 1);
+    if (tail === "" || Number.isNaN(Number.parseFloat(tail))) return;
+
+    console.warn(
+      `Reveal: unusable step in data-reveal-group "${raw}", grouping by the whole value`,
+      element,
+    );
+  }
+
+  /**
    * Stagger the grouped elements in this batch, before they are revealed
    *
-   * Delays are batch-relative, not index-relative: the members revealed
-   * together get 0, step, 2*step, and the next wave starts from zero again. A
-   * list taller than the viewport therefore cascades once per wave instead of
-   * accumulating a delay nobody would sit through, and an element that arrives
-   * on its own arrives immediately.
+   * Only elements actually arriving are passed in. Delays are batch-relative,
+   * not index-relative: the members revealed together get 0, step, 2*step, and
+   * the next wave starts from zero again. A list taller than the viewport
+   * therefore cascades once per wave instead of accumulating a delay nobody
+   * would sit through, and an element that arrives on its own arrives
+   * immediately.
    *
    * The value is written as an inline `--reveal-delay`, which is the documented
    * escape hatch for a computed timing value - it feeds the same custom
@@ -444,8 +497,10 @@ class RevealController {
 
       const step = this.#groupSteps.get(name);
       // A group with no step declared anywhere is still a group, it just has
-      // nothing to say about timing - so the element's own classes stand.
-      if (!step) return;
+      // nothing to say about timing - so the element's own classes stand. A
+      // declared `0` is not that: it says the members arrive together, and it
+      // still overrides their classes.
+      if (step === undefined) return;
 
       let members = this.#wave.get(name);
       if (!members) {
@@ -460,6 +515,7 @@ class RevealController {
       }
 
       element.style.setProperty(DELAY_PROPERTY, `${index * step}ms`);
+      this.#staggered.set(element, name);
       this.#openWave();
     });
   }
@@ -528,27 +584,54 @@ class RevealController {
     });
   }
 
+  /**
+   * Move a trigger's targets into (or out of) the revealed state
+   *
+   * Only elements whose state actually changes take part. Every rebuild hands
+   * its observers back at "not crossed" and then announces the crossings again,
+   * so an already-revealed element is re-announced routinely - and acting on
+   * that would restart its settle, rewrite `--reveal-delay` under a transition
+   * already in flight, and let it claim a place in a wave it is not part of.
+   *
+   * The class itself is the record, never a private set. Anything can take
+   * `is-revealed` off an element - a framework re-rendering the class
+   * attribute, an author replaying a reveal - and a controller holding its own
+   * opinion would call every later crossing a no-op and strand the element
+   * hidden, with nothing able to argue it back.
+   */
   #setRevealed(group, trigger, revealed) {
     const targets = group.byTrigger.get(trigger);
     if (!targets) return;
 
+    const changed = targets.filter(
+      (element) => element.classList.contains(REVEALED_CLASS) !== revealed,
+    );
+    if (changed.length === 0) return;
+
     // Before the class, and in the same synchronous pass, or the transition
     // starts against the delay the element was already carrying
-    if (revealed) this.#stagger(targets);
+    if (revealed) this.#stagger(changed);
 
-    targets.forEach((element) => {
+    changed.forEach((element) => {
       element.classList.toggle(REVEALED_CLASS, revealed);
       if (revealed) return;
 
       // The reveal transition has to be in force again on the way out
       element.classList.remove(DONE_CLASS);
-      // Hiding is not staggered - the next wave hands out its own delays
-      if (this.#groupNames.has(element)) {
+      // Hiding is not staggered - the next wave hands out its own delays. Only
+      // a value this controller wrote, for the group that is still the
+      // element's own, is dropped: a step-less group leaves the author's inline
+      // `--reveal-delay` alone, and so does an element that has since left the
+      // group that wrote the value - whether for no group at all or for a
+      // different one - and been given a delay of its own.
+      const owner = this.#staggered.get(element);
+      if (owner !== undefined && this.#groupNames.get(element) === owner) {
+        this.#staggered.delete(element);
         element.style.removeProperty(DELAY_PROPERTY);
       }
     });
 
-    this.#settleTargets(targets, revealed);
+    this.#settleTargets(changed, revealed);
   }
 
   /**
@@ -557,6 +640,9 @@ class RevealController {
    * Timed per target rather than per trigger: an anchor says nothing about the
    * duration or delay of the elements anchored to it, and cutting a 1.8s
    * reveal short would strand it mid-transform.
+   *
+   * Each pending settle carries its own `finish`, so a teardown can complete
+   * what it interrupts rather than dropping it.
    */
   #settleTargets(targets, revealed) {
     targets.forEach((element) => {
@@ -568,17 +654,18 @@ class RevealController {
       };
 
       // null means there was no transition to wait for and finish already ran,
-      // so there is nothing left to cancel
+      // so there is nothing left to cancel. `finish` is kept alongside the
+      // cancel so a teardown can pay the settle off rather than drop it.
       const cancel = whenSettled(element, finish);
-      if (cancel) this.#settles.set(element, cancel);
+      if (cancel) this.#settles.set(element, { cancel, finish });
     });
   }
 
   #cancelSettle(element) {
-    const cancel = this.#settles.get(element);
-    if (!cancel) return;
+    const settle = this.#settles.get(element);
+    if (!settle) return;
     this.#settles.delete(element);
-    cancel();
+    settle.cancel();
   }
 
   #teardownObservers() {

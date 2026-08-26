@@ -264,6 +264,14 @@ export function transitionPlan(element) {
  * care is a consumer counting the elements a batch reveals: staggering a row of
  * siblings only reads as a cascade if the callbacks come left to right.
  *
+ * Anything without a comparable position - a target detached between the
+ * intersection and its delivery, or one living in a different tree - is
+ * partitioned out rather than compared. A comparator that answers "equal" for
+ * pairs it cannot place is not an ordering at all, and TimSort is entitled to
+ * scramble the whole batch off one such pair; the ones it can place stay
+ * exactly as ordered as they were, and the rest keep their arrival order behind
+ * them.
+ *
  * @param {IntersectionObserverEntry[]} entries
  * @returns {IntersectionObserverEntry[]} A sorted copy, or the batch untouched
  * when there is nothing to sort
@@ -271,13 +279,34 @@ export function transitionPlan(element) {
 function inDocumentOrder(entries) {
   if (!entries || entries.length < 2) return entries;
 
-  return Array.prototype.slice.call(entries).sort((a, b) => {
-    if (!a.target || !b.target || a.target === b.target) return 0;
-    const relation = a.target.compareDocumentPosition(b.target);
-    // A detached node has no position to compare, so it keeps its place
-    if (relation & 1) return 0;
-    return relation & 4 ? -1 : 1;
+  const batch = Array.prototype.slice.call(entries);
+  const rooted = batch.find(
+    (entry) => entry.target && entry.target.isConnected,
+  );
+  if (!rooted) return batch;
+
+  const tree = rooted.target.getRootNode
+    ? rooted.target.getRootNode()
+    : document;
+
+  const placeable = [];
+  const rest = [];
+  batch.forEach((entry) => {
+    const target = entry.target;
+    const comparable =
+      target &&
+      target.isConnected &&
+      (!target.getRootNode || target.getRootNode() === tree);
+    (comparable ? placeable : rest).push(entry);
   });
+
+  placeable.sort((a, b) => {
+    if (a.target === b.target) return 0;
+    // Both are in the same tree, so the relation is always a real one
+    return a.target.compareDocumentPosition(b.target) & 4 ? -1 : 1;
+  });
+
+  return placeable.concat(rest);
 }
 
 /**

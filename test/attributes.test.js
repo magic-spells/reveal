@@ -64,7 +64,6 @@ describe("parseGroup", () => {
       step: 50,
     });
     expect(parseGroup("row: 120 ")).toEqual({ name: "row", step: 120 });
-    expect(parseGroup("row:0")).toEqual({ name: "row", step: 0 });
   });
 
   it("is absent when there is nothing to group by", () => {
@@ -75,20 +74,46 @@ describe("parseGroup", () => {
     // a step with no name names no group
     expect(parseGroup(":50")).toBe(null);
     expect(parseGroup(" : 50")).toBe(null);
+    expect(parseGroup(":")).toBe(null);
+    // and neither does a leading colon whose tail is not a step - the name is
+    // what is missing, and nothing after the colon can supply one
+    expect(parseGroup(":abc")).toBe(null);
+    expect(parseGroup(" : abc ")).toBe(null);
   });
 
-  it("keeps the group and drops an unusable step", () => {
+  it("reads a declared zero as a step, not as no step at all", () => {
+    // first-wins only means something if `0` can win
+    expect(parseGroup("row:0")).toEqual({ name: "row", step: 0 });
+    expect(parseGroup("row: 0 ")).toEqual({ name: "row", step: 0 });
+  });
+
+  it("takes a trailing colon as a step left out of the name", () => {
+    // a template rendering an empty step must not move its elements into a
+    // group of their own
     expect(parseGroup("row:")).toEqual({ name: "row", step: null });
-    expect(parseGroup("row:abc")).toEqual({ name: "row", step: null });
-    expect(parseGroup("row:-50")).toEqual({ name: "row", step: null });
-    expect(parseGroup("row:NaN")).toEqual({ name: "row", step: null });
-    expect(parseGroup("row:Infinity")).toEqual({ name: "row", step: null });
+    expect(parseGroup("row: ")).toEqual({ name: "row", step: null });
+  });
+
+  it("keeps a whole unparseable value as the name", () => {
+    // otherwise `row:abc` would be a different group from `row:abc:50`
+    expect(parseGroup("row:abc")).toEqual({ name: "row:abc", step: null });
+    expect(parseGroup("row:-50")).toEqual({ name: "row:-50", step: null });
+    expect(parseGroup("row:NaN")).toEqual({ name: "row:NaN", step: null });
+    expect(parseGroup("row:Infinity")).toEqual({
+      name: "row:Infinity",
+      step: null,
+    });
   });
 
   it("splits on the last colon, so a name may contain earlier ones", () => {
     expect(parseGroup("cards:hero:75")).toEqual({
       name: "cards:hero",
       step: 75,
+    });
+    // and the same name without a step is the same group, not `cards`
+    expect(parseGroup("cards:hero")).toEqual({
+      name: "cards:hero",
+      step: null,
     });
   });
 

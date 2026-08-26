@@ -227,7 +227,7 @@ Re-queries `.reveal` elements, then refreshes. Call after adding content to the 
 
 ### `destroy()`
 
-Disconnects every observer and listener, and removes the inline custom properties it wrote. Revealed elements keep `is-revealed` - removing it would snap live content back to its resting state - and `reveal-off` goes on `<html>`, because nothing is left running to reveal whatever had not arrived yet. Anything still below its trigger line becomes visible at that moment. `init()` does not go through this path, so re-initializing never flashes the page.
+Disconnects every observer and listener, and removes the inline custom properties it wrote. Revealed elements keep `is-revealed` - removing it would snap live content back to its resting state - and anything still mid-transition is marked `reveal-done` on the way out, so its own transitions are handed straight back rather than left overridden. `reveal-off` goes on `<html>`, because nothing is left running to reveal whatever had not arrived yet. Anything still below its trigger line becomes visible at that moment. `init()` does not go through this path, so re-initializing never flashes the page. It does share the settle debt, though: a plain `init()` re-arm also stamps `reveal-done` on anything mid-transition, which snaps that reveal forward to its finished state - never back to hidden - so a re-arm landing in the middle of a long reveal cuts it short rather than replaying it.
 
 ### `observeCross(elements, options)`
 
@@ -279,7 +279,9 @@ Every member of `products` that reveals in the same crossing gets an inline `--r
 
 **The step is first-wins.** It comes from the first member in document order that declares one, so a loop can repeat the same value on every iteration without them fighting. A later `products:200` on the same group is ignored, and a group where nobody declares a step — `data-reveal-group="products"` — simply has no opinion about timing, leaving each member's own `reveal-delay-*` class in force.
 
-**Delays are relative to the wave, not to the list.** The counting restarts on every crossing, so a list taller than the viewport cascades once per screenful instead of accumulating a delay nobody would sit through — and an item that arrives on its own arrives immediately. On the way back out under `data-reveal-once="false"` the inline value is removed, so hiding is never staggered; the next wave hands out fresh delays.
+**Delays are relative to the wave, not to the list.** The counting restarts on every crossing, so a list taller than the viewport cascades once per screenful instead of accumulating a delay nobody would sit through — and an item that arrives on its own arrives immediately. On the way back out under `data-reveal-once="false"` the delay the group wrote is removed, so hiding is never staggered; the next wave hands out fresh delays. Only a delay the group wrote, for an element still in that group, is removed — a group with no step of its own writes nothing and removes nothing, and an element that has left its group keeps whatever `--reveal-delay` it is carrying now.
+
+`refreshHard()` restarts the counting too. Only members actually arriving are counted, so content appended to a list that has already cascaded is a new wave starting from `0ms` rather than an item eleven at `600ms`, and re-querying never rewrites a delay under a transition still in flight.
 
 Compose it with an anchor and the whole group fires on one crossing, in order:
 
@@ -295,8 +297,11 @@ Details worth knowing:
 
 - The step is in **milliseconds**, bare — `products:60`, not `products:60ms`.
 - The group writes an inline `--reveal-delay`, which **outranks a `reveal-delay-*` class** on the same element. That is the intended precedence: in a group, the group decides the delay.
-- `:` separates the name from the step, splitting on the **last** one — so `:` is effectively reserved in a group name.
-- An unusable step — empty, non-numeric, negative — is ignored rather than fatal, and the group keeps working without one. A value with no name at all (`":50"`) is not a group.
+- **`products:0` is a declaration, not an omission.** It says the members arrive together, and it still overrides their delay classes — which is what makes first-wins worth having: a `0` in front wins over a `200` behind it. Declaring nothing at all is `products`, with no colon.
+- `:` separates the name from the step, splitting on the **last** one — so `:` is effectively reserved in a group name. It is read as a separator only when what follows it parses as a step: `cards:hero` is a group *called* `cards:hero`, the same one `cards:hero:75` gives a step to. The exception is a trailing colon, which is a step left out — `products:` is the group `products`.
+- An unusable step — non-numeric, negative — is not fatal: it is simply part of the name, and the group works without a step. One that reads as a number and still cannot be a step (`products:-50`) also logs a warning, since a silently forked group name is hard to see from the outside.
+- A value that leads with the colon names nothing, so it is not a group at all: `":50"` and `":abc"` alike.
+- A group is counted **per wave, not per observer**. The count is keyed by the group name alone and stays open for the rest of the task, so every member arriving in that task continues the same cascade — including members sitting on different trigger lines. A group split across `data-reveal-offset`, `data-reveal-once` or `data-reveal-anchor-placement` settings can therefore hand out `0ms, 50ms, 100ms, 150ms` straight across the two sets, or start each set from `0ms`, depending only on whether the crossings land in one task or two. Keep those three the same across a group you want counted as one.
 
 ## Anchor placements
 
