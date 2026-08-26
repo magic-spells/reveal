@@ -210,6 +210,30 @@ export function transitionPlan(element) {
 }
 
 /**
+ * Sort one batch of entries into document order
+ *
+ * The order entries arrive in is not specified anywhere, and evaluation itself
+ * does not care - each element is measured against its own state. What does
+ * care is a consumer counting the elements a batch reveals: staggering a row of
+ * siblings only reads as a cascade if the callbacks come left to right.
+ *
+ * @param {IntersectionObserverEntry[]} entries
+ * @returns {IntersectionObserverEntry[]} A sorted copy, or the batch untouched
+ * when there is nothing to sort
+ */
+function inDocumentOrder(entries) {
+  if (!entries || entries.length < 2) return entries;
+
+  return Array.prototype.slice.call(entries).sort((a, b) => {
+    if (!a.target || !b.target || a.target === b.target) return 0;
+    const relation = a.target.compareDocumentPosition(b.target);
+    // A detached node has no position to compare, so it keeps its place
+    if (relation & 1) return 0;
+    return relation & 4 ? -1 : 1;
+  });
+}
+
+/**
  * Tracks a set of elements against a single trigger line
  */
 class CrossObserver {
@@ -449,7 +473,7 @@ class CrossObserver {
   #handleEntries(entries) {
     if (this.#isDestroyed) return;
     // One element's callback must never strand the rest of the batch
-    entries.forEach((entry) => {
+    inDocumentOrder(entries).forEach((entry) => {
       try {
         this.#evaluate(entry.target, entry);
       } catch (error) {

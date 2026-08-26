@@ -17,6 +17,7 @@ Class-driven scroll reveals on IntersectionObserver. AOS-style effects as plain 
 - 🎛️ **Custom-property timing** - every timing class sets one CSS variable read by a single transition rule
 - 🌬️ **Tailwind entry** - every class as a `@utility`, so a project ships only the effects and timings it writes
 - ⚓ **Anchor groups** - several elements can fire together off one trigger, each with its own delay
+- 🎞️ **Stagger groups** - `data-reveal-group="name:50"` cascades whatever arrives together, so a loop needs no per-index class
 - 🧭 **Nine anchor placements** - element edge to viewport edge, the same nine AOS supports
 - ♿ **Reduced motion, live** - `prefers-reduced-motion: reduce` shows everything immediately, and the page re-arms itself if the setting changes
 - 🔌 **Real teardown** - `destroy()` disconnects everything, for SPA route changes
@@ -121,6 +122,8 @@ The Tailwind build has no scale - any integer generates on demand. On the plain 
 <div class="reveal reveal-fade-up" style="--reveal-delay: {{ forloop.index0 | times: 60 }}ms"></div>
 ```
 
+For a cascade specifically, `data-reveal-group` writes that same property for you and restarts the count on every wave - see [Stagger groups](#stagger-groups).
+
 ## Tailwind
 
 Tailwind projects import a different entry. It is **either/or** — the two builds carry the same effects, and loading both ships each one twice.
@@ -154,7 +157,7 @@ Arbitrary values work throughout — `reveal-delay-[0.4s]`, `reveal-ease-[steps(
 
 A value computed at runtime rides the custom property as an inline style — `style="--reveal-delay: {{ index | times: 60 }}ms"` generates no CSS at all, where a class has to exist at build time.
 
-Behavior — `data-reveal-once`, `data-reveal-anchor`, `data-reveal-offset` — is read by the JavaScript from attributes either way; see below.
+Behavior — `data-reveal-once`, `data-reveal-anchor`, `data-reveal-offset`, `data-reveal-group` — is read by the JavaScript from attributes either way; see below. In a loop where the index is not known at build time, [`data-reveal-group`](#stagger-groups) is the one that hands out the delays for you.
 
 ## Attributes
 
@@ -166,6 +169,7 @@ Classes say what a reveal looks like; data attributes say how the observer treat
 | `data-reveal-once` | `"true"` / `"false"` | Reveal once, or reveal and hide again on every crossing. Overrides the global `once` |
 | `data-reveal-anchor` | CSS selector | Take the trigger geometry from that element instead of this one |
 | `data-reveal-anchor-placement` | placement | Which edge of the trigger has to reach which edge of the viewport |
+| `data-reveal-group` | `name` or `name:step` | Stagger the members revealed together by `step` milliseconds — see [Stagger groups](#stagger-groups) |
 
 ```html
 <div
@@ -261,6 +265,39 @@ Add `data-reveal-anchor-placement` to say where in the viewport the anchor has t
 ></div>
 ```
 
+## Stagger groups
+
+A cascade is a delay per element, and in a loop nobody can write one: the index only exists at render time, and a Tailwind class built from it — `reveal-delay-{{ i * 50 }}` — is a string the JIT never sees. `data-reveal-group` moves that arithmetic to the library.
+
+```html
+{% for product in collection.products %}
+  <div class="reveal reveal-fade-up" data-reveal-group="products:60">…</div>
+{% endfor %}
+```
+
+Every member of `products` that reveals in the same crossing gets an inline `--reveal-delay` of `0ms`, `60ms`, `120ms`, … in document order. No class has to exist, and nothing about the group changes what a reveal looks like.
+
+**The step is first-wins.** It comes from the first member in document order that declares one, so a loop can repeat the same value on every iteration without them fighting. A later `products:200` on the same group is ignored, and a group where nobody declares a step — `data-reveal-group="products"` — simply has no opinion about timing, leaving each member's own `reveal-delay-*` class in force.
+
+**Delays are relative to the wave, not to the list.** The counting restarts on every crossing, so a list taller than the viewport cascades once per screenful instead of accumulating a delay nobody would sit through — and an item that arrives on its own arrives immediately. On the way back out under `data-reveal-once="false"` the inline value is removed, so hiding is never staggered; the next wave hands out fresh delays.
+
+Compose it with an anchor and the whole group fires on one crossing, in order:
+
+```html
+<section id="pricing">
+  <div class="reveal reveal-fade-up" data-reveal-anchor="#pricing" data-reveal-group="plans:150">Basic</div>
+  <div class="reveal reveal-fade-up" data-reveal-anchor="#pricing" data-reveal-group="plans:150">Pro</div>
+  <div class="reveal reveal-fade-up" data-reveal-anchor="#pricing" data-reveal-group="plans:150">Team</div>
+</section>
+```
+
+Details worth knowing:
+
+- The step is in **milliseconds**, bare — `products:60`, not `products:60ms`.
+- The group writes an inline `--reveal-delay`, which **outranks a `reveal-delay-*` class** on the same element. That is the intended precedence: in a group, the group decides the delay.
+- `:` separates the name from the step, splitting on the **last** one — so `:` is effectively reserved in a group name.
+- An unusable step — empty, non-numeric, negative — is ignored rather than fatal, and the group keeps working without one. A value with no name at all (`":50"`) is not a group.
+
 ## Anchor placements
 
 Placements are named `<element-edge>-<viewport-edge>`: the first half is the part of the trigger element being measured, the second half is the line in the viewport it has to reach.
@@ -326,7 +363,7 @@ Resting states are written `:not(.is-revealed)` — when the class lands they st
 | Property | Default | Set by |
 |----------|---------|--------|
 | `--reveal-duration` | `0.6s` | `init({ duration })`, `reveal-duration-*` |
-| `--reveal-delay` | `0s` | `init({ delay })`, `reveal-delay-*` |
+| `--reveal-delay` | `0s` | `init({ delay })`, `reveal-delay-*`, `data-reveal-group` (inline, so it wins) |
 | `--reveal-easing` | `cubic-bezier(0.16, 1, 0.3, 1)` | `init({ easing })`, `reveal-ease-*` |
 | `--reveal-distance` | `24px` | your stylesheet |
 

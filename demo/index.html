@@ -465,6 +465,28 @@
         );
       }
 
+      /* ---- Stagger-group list ---- */
+      .wave-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.6rem;
+      }
+
+      .wave-item {
+        padding: 0.85rem 1.3rem;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        color: var(--cream-dim);
+        font-family: var(--font-mono);
+        font-size: 0.82rem;
+        letter-spacing: 0.04em;
+      }
+
+      .wave-item:nth-child(4n) {
+        border-color: var(--border-accent);
+      }
+
       /* ---- Anchor band ---- */
       .band {
         position: relative;
@@ -1289,6 +1311,141 @@
             class="<b>reveal reveal-zoom-in reveal-delay-100</b>"
             <b>data-reveal-anchor</b>="#cascade"&gt;&lt;/span&gt;
             <span>&lt;/div&gt;</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="demo-section">
+        <div class="wrap">
+          <div class="demo-header">
+            <div class="demo-tags">
+              <span class="demo-tag">stagger groups</span>
+              <span class="demo-tag alt">every wave starts at 0</span>
+            </div>
+            <h2 class="reveal reveal-fade-up">Smart group delay</h2>
+            <p class="demo-desc reveal reveal-fade-up reveal-delay-100">
+              Every item shares <code>data-reveal-group="demo-list:50"</code> —
+              no delay classes. Whatever arrives together cascades from 0, so
+              items further down start fresh waves instead of carrying
+              accumulated index delays.
+            </p>
+          </div>
+
+          <div class="wave-list">
+            <div
+              class="wave-item reveal reveal-fade-up"
+              data-reveal-group="demo-list:50"
+            >
+              Item 01
+            </div>
+            <div
+              class="wave-item reveal reveal-fade-up"
+              data-reveal-group="demo-list:50"
+            >
+              Item 02
+            </div>
+            <div
+              class="wave-item reveal reveal-fade-up"
+              data-reveal-group="demo-list:50"
+            >
+              Item 03
+            </div>
+            <div
+              class="wave-item reveal reveal-fade-up"
+              data-reveal-group="demo-list:50"
+            >
+              Item 04
+            </div>
+            <div
+              class="wave-item reveal reveal-fade-up"
+              data-reveal-group="demo-list:50"
+            >
+              Item 05
+            </div>
+            <div
+              class="wave-item reveal reveal-fade-up"
+              data-reveal-group="demo-list:50"
+            >
+              Item 06
+            </div>
+            <div
+              class="wave-item reveal reveal-fade-up"
+              data-reveal-group="demo-list:50"
+            >
+              Item 07
+            </div>
+            <div
+              class="wave-item reveal reveal-fade-up"
+              data-reveal-group="demo-list:50"
+            >
+              Item 08
+            </div>
+            <div
+              class="wave-item reveal reveal-fade-up"
+              data-reveal-group="demo-list:50"
+            >
+              Item 09
+            </div>
+            <div
+              class="wave-item reveal reveal-fade-up"
+              data-reveal-group="demo-list:50"
+            >
+              Item 10
+            </div>
+            <div
+              class="wave-item reveal reveal-fade-up"
+              data-reveal-group="demo-list:50"
+            >
+              Item 11
+            </div>
+            <div
+              class="wave-item reveal reveal-fade-up"
+              data-reveal-group="demo-list:50"
+            >
+              Item 12
+            </div>
+            <div
+              class="wave-item reveal reveal-fade-up"
+              data-reveal-group="demo-list:50"
+            >
+              Item 13
+            </div>
+            <div
+              class="wave-item reveal reveal-fade-up"
+              data-reveal-group="demo-list:50"
+            >
+              Item 14
+            </div>
+            <div
+              class="wave-item reveal reveal-fade-up"
+              data-reveal-group="demo-list:50"
+            >
+              Item 15
+            </div>
+            <div
+              class="wave-item reveal reveal-fade-up"
+              data-reveal-group="demo-list:50"
+            >
+              Item 16
+            </div>
+            <div
+              class="wave-item reveal reveal-fade-up"
+              data-reveal-group="demo-list:50"
+            >
+              Item 17
+            </div>
+            <div
+              class="wave-item reveal reveal-fade-up"
+              data-reveal-group="demo-list:50"
+            >
+              Item 18
+            </div>
+          </div>
+
+          <div class="code">
+            <span>&lt;!-- in a loop — no index in sight --&gt;</span>
+            &lt;div class="<b>reveal reveal-fade-up</b>"
+            <b>data-reveal-group</b>="demo-list:50"&gt;…&lt;/div&gt;
           </div>
         </div>
       </section>

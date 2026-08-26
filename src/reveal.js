@@ -1,6 +1,6 @@
 import "./reveal.css";
 import { observeCross, transitionPlan } from "./observe-cross.js";
-import { parseOffset, parseOnce } from "./attributes.js";
+import { parseGroup, parseOffset, parseOnce } from "./attributes.js";
 
 /**
  * Class on <html> that un-hides every resting state. Resting states apply
@@ -37,6 +37,9 @@ const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
 /** Grace period added to a transition's own timing before giving up on it (ms) */
 const SETTLE_SLACK = 80;
 
+/** The one property a stagger group writes, as an inline style, per member */
+const DELAY_PROPERTY = "--reveal-delay";
+
 /** Global options mapped to the same properties, published on <html> */
 const GLOBAL_TIMING = [
   ["duration", "--reveal-duration", true],
@@ -65,6 +68,10 @@ class RevealController {
   #userOptions = {};
   #groups = [];
   #settles = new Map();
+  #groupNames = new Map();
+  #groupSteps = new Map();
+  #wave = new Map();
+  #waveTimer = null;
   #initialized = false;
   #disabled = false;
   #rebuilding = false;
@@ -166,6 +173,12 @@ class RevealController {
       this.#cancelSettle(element, settle),
     );
     this.#settles.clear();
+
+    // Inline delays are left where they are, the way `is-revealed` is: they
+    // belong to reveals that already happened.
+    this.#groupNames.clear();
+    this.#groupSteps.clear();
+    this.#endWave();
 
     if (typeof document !== "undefined") {
       GLOBAL_TIMING.forEach(([, property]) =>
@@ -338,6 +351,11 @@ class RevealController {
     const index = new Map();
     this.#groups = [];
 
+    // Both are rebuilt from scratch: collection order decides which member's
+    // step a group takes, and a rebuild can reorder or replace the members.
+    this.#groupNames.clear();
+    this.#groupSteps.clear();
+
     document.querySelectorAll(SELECTOR).forEach((element) => {
       // One malformed element must never stop the rest from being armed
       try {
@@ -365,6 +383,8 @@ class RevealController {
       this.#groups.push(group);
     }
 
+    this.#registerGroup(element);
+
     const trigger = this.#resolveTrigger(element);
     const targets = group.byTrigger.get(trigger);
     if (targets) {
@@ -388,6 +408,88 @@ class RevealController {
     }
 
     return value;
+  }
+
+  /**
+   * Note an element's stagger group, and the group's step
+   *
+   * The step is first-wins: whichever member comes first in collection order -
+   * document order - and declares one sets it, and later declarations are
+   * ignored rather than fought over. This runs on every rebuild, because the
+   * order the members appear in is exactly what can change.
+   */
+  #registerGroup(element) {
+    const group = parseGroup(element.getAttribute("data-reveal-group"));
+    if (!group) return;
+
+    this.#groupNames.set(element, group.name);
+
+    if (group.step !== null && !this.#groupSteps.has(group.name)) {
+      this.#groupSteps.set(group.name, group.step);
+    }
+  }
+
+  /**
+   * Stagger the grouped elements in this batch, before they are revealed
+   *
+   * Delays are batch-relative, not index-relative: the members revealed
+   * together get 0, step, 2*step, and the next wave starts from zero again. A
+   * list taller than the viewport therefore cascades once per wave instead of
+   * accumulating a delay nobody would sit through, and an element that arrives
+   * on its own arrives immediately.
+   *
+   * The value is written as an inline `--reveal-delay`, which is the documented
+   * escape hatch for a computed timing value - it feeds the same custom
+   * property the timing classes set, and outranks them.
+   */
+  #stagger(targets) {
+    targets.forEach((element) => {
+      const name = this.#groupNames.get(element);
+      if (name === undefined) return;
+
+      const step = this.#groupSteps.get(name);
+      // A group with no step declared anywhere is still a group, it just has
+      // nothing to say about timing - so the element's own classes stand.
+      if (!step) return;
+
+      let members = this.#wave.get(name);
+      if (!members) {
+        members = [];
+        this.#wave.set(name, members);
+      }
+
+      let index = members.indexOf(element);
+      if (index === -1) {
+        index = members.length;
+        members.push(element);
+      }
+
+      element.style.setProperty(DELAY_PROPERTY, `${index * step}ms`);
+      this.#openWave();
+    });
+  }
+
+  /**
+   * Keep the current batch open until the browser is done delivering it
+   *
+   * Every observer in a group can hand us its own callback for one scroll
+   * position, and each of those callbacks is a separate turn of the event loop
+   * with its own microtask checkpoint - so a microtask would close the wave
+   * halfway through the arrival it is meant to describe. A task boundary is the
+   * first point at which nothing more can belong to the same crossing.
+   */
+  #openWave() {
+    if (this.#waveTimer !== null) return;
+    this.#waveTimer = setTimeout(() => {
+      this.#waveTimer = null;
+      this.#wave.clear();
+    }, 0);
+  }
+
+  #endWave() {
+    if (this.#waveTimer !== null) clearTimeout(this.#waveTimer);
+    this.#waveTimer = null;
+    this.#wave.clear();
   }
 
   #observe() {
@@ -435,10 +537,20 @@ class RevealController {
     const targets = group.byTrigger.get(trigger);
     if (!targets) return;
 
+    // Before the class, and in the same synchronous pass, or the transition
+    // starts against the delay the element was already carrying
+    if (revealed) this.#stagger(targets);
+
     targets.forEach((element) => {
       element.classList.toggle(REVEALED_CLASS, revealed);
+      if (revealed) return;
+
       // The reveal transition has to be in force again on the way out
-      if (!revealed) element.classList.remove(DONE_CLASS);
+      element.classList.remove(DONE_CLASS);
+      // Hiding is not staggered - the next wave hands out its own delays
+      if (this.#groupNames.has(element)) {
+        element.style.removeProperty(DELAY_PROPERTY);
+      }
     });
 
     this.#settleTargets(targets, revealed);
