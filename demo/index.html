@@ -1,0 +1,1607 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Reveal — @magic-spells</title>
+    <meta
+      name="description"
+      content="Class-driven scroll reveals on IntersectionObserver. Thirty-two effects, nine anchor placements, anchor groups, real teardown. 5 kB and no dependencies."
+    />
+    <link rel="canonical" href="https://magic-spells.github.io/reveal/demo/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="@magic-spells/reveal" />
+    <meta
+      property="og:description"
+      content="Content that arrives. Scroll reveals decided on layout geometry, animated entirely in CSS."
+    />
+    <meta
+      property="og:url"
+      content="https://magic-spells.github.io/reveal/demo/"
+    />
+    <meta name="twitter:card" content="summary" />
+    <!-- Inlined as a data URI so the repo stays binary-free and the browser's
+		     automatic /favicon.ico request never 404s. Three stacked bars, the
+		     lowest still on its way in — the package's own silhouette. -->
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2308070e'/%3E%3Crect x='7' y='7' width='18' height='4' rx='2' fill='%23a08cff'/%3E%3Crect x='7' y='14' width='18' height='4' rx='2' fill='%23a08cff' opacity='.6'/%3E%3Crect x='7' y='21' width='11' height='4' rx='2' fill='%23a08cff' opacity='.25'/%3E%3C/svg%3E"
+    />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Outfit:wght@200;300;400;500&display=swap"
+      rel="stylesheet"
+    />
+
+    <link rel="stylesheet" href="reveal.min.css" />
+
+    <style>
+      :root {
+        /* Iris sits at about 258°; the ground is pushed toward its
+				   complement and taken to near-black, so the accent reads as light
+				   arriving on a cold page rather than as a tinted wash. */
+        --bg-deep: #08070e;
+        --bg-card: #100e18;
+        --bg-card-hover: #171425;
+        --bg-well: #0b0a12;
+        --border: #241f33;
+        --border-accent: #3a3050;
+
+        --iris: #a08cff;
+        --iris-dim: #6a5bb0;
+        --iris-glow: rgba(160, 140, 255, 0.14);
+        --rose: #f0a0c0;
+
+        /* Text ramp, measured on --bg-card #100e18, the darkest surface any
+				   of these sit on: cream 16.2:1 · cream-dim 11.9:1 · text 13.1:1 ·
+				   text-dim 8.4:1 · iris 7.6:1. */
+        --cream: #f6f3fb;
+        --cream-dim: #d5cfe4;
+        --text: #e4dff0;
+        --text-dim: #b6afc7;
+
+        --font-display: "Cormorant Garamond", Georgia, serif;
+        --font-body: "Outfit", system-ui, sans-serif;
+        --font-mono: "Courier New", ui-monospace, monospace;
+
+        /* The package's own properties — everything else on this page is
+				   ordinary CSS a consumer would write. */
+        --reveal-duration: 700ms;
+        --reveal-easing: cubic-bezier(0.16, 1, 0.3, 1);
+        --reveal-distance: 28px;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      html {
+        background: var(--bg-deep);
+        scroll-behavior: smooth;
+      }
+
+      body {
+        min-width: 0;
+        color: var(--text);
+        background: var(--bg-deep);
+        font-family: var(--font-body);
+        font-weight: 300;
+        overflow-x: hidden;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      /* ---- Noise overlay ----
+			   Above the page but under the HUD, so the grain falls over content
+			   without dulling the readouts. */
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        z-index: 400;
+        pointer-events: none;
+        opacity: 0.024;
+        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+        background-repeat: repeat;
+        background-size: 256px;
+      }
+
+      :where(a, button, [tabindex]):focus-visible {
+        outline: 2px solid var(--iris);
+        outline-offset: 3px;
+      }
+
+      code {
+        font-family: var(--font-mono);
+        font-size: 0.92em;
+        color: var(--cream-dim);
+      }
+
+      em {
+        color: var(--iris);
+        font-style: normal;
+      }
+
+      .wrap {
+        width: min(1080px, 100% - 3rem);
+        margin-inline: auto;
+      }
+
+      /* ---- Hero ---- */
+      .hero {
+        position: relative;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        padding: 6rem 1.5rem 7rem;
+      }
+
+      .hero::before {
+        content: "";
+        position: absolute;
+        top: -42%;
+        left: 50%;
+        width: 1100px;
+        height: 940px;
+        max-width: 135vw;
+        transform: translateX(-50%);
+        background: radial-gradient(ellipse, var(--iris-glow), transparent 68%);
+        pointer-events: none;
+      }
+
+      /* The package's own gesture, borrowed as the page's opening mark:
+			   three bars arriving one after another, each a real .reveal
+			   with its own delay. */
+      .hero-mark {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        gap: 9px;
+        width: 92px;
+        margin-bottom: 2.5rem;
+      }
+
+      .hero-mark i {
+        display: block;
+        height: 7px;
+        border-radius: 7px;
+        background: var(--iris);
+      }
+
+      .hero-mark i:nth-child(2) {
+        width: 76%;
+        background: var(--iris-dim);
+      }
+
+      .hero-mark i:nth-child(3) {
+        width: 48%;
+        background: var(--iris-dim);
+      }
+
+      .hero-badge {
+        position: relative;
+        margin-bottom: 2.25rem;
+        padding: 0.45em 1.25em;
+        color: var(--iris);
+        border: 1px solid var(--border-accent);
+        border-radius: 100px;
+        font-size: 0.95rem;
+        letter-spacing: 0.1em;
+        text-decoration: none;
+        text-transform: uppercase;
+        transition: border-color 0.3s ease;
+      }
+
+      .hero-badge:hover {
+        border-color: var(--iris-dim);
+      }
+
+      .hero h1 {
+        position: relative;
+        max-width: 12ch;
+        margin-bottom: 1.5rem;
+        color: var(--cream);
+        font-family: var(--font-display);
+        font-size: clamp(3.2rem, 10vw, 7.2rem);
+        font-weight: 300;
+        letter-spacing: -0.025em;
+        line-height: 0.95;
+      }
+
+      .hero h1 em {
+        color: var(--iris);
+        font-style: italic;
+      }
+
+      .hero-tagline {
+        position: relative;
+        max-width: 58ch;
+        font-size: 1.12rem;
+        line-height: 1.75;
+        color: var(--text-dim);
+        text-wrap: pretty;
+      }
+
+      .hero-install {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.55rem;
+        margin-top: 2.75rem;
+        max-width: 100%;
+      }
+
+      .install-label {
+        color: var(--text-dim);
+        font-size: 0.78rem;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+      }
+
+      .install-value {
+        max-width: calc(100vw - 2.5rem);
+        padding: 0.6em 1.1em;
+        color: var(--cream);
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        font-family: var(--font-mono);
+        font-size: clamp(0.76rem, 3.4vw, 0.94rem);
+        white-space: nowrap;
+        overflow-x: auto;
+        user-select: all;
+        cursor: copy;
+        transition:
+          border-color 0.3s ease,
+          color 0.3s ease;
+      }
+
+      .install-value:hover {
+        border-color: var(--iris-dim);
+      }
+
+      .hero-install.copied .install-label,
+      .hero-install.copied .install-value {
+        color: var(--iris);
+      }
+
+      .hero-install.copied .install-value {
+        border-color: var(--iris-dim);
+      }
+
+      .size-note {
+        display: flex;
+        align-items: baseline;
+        justify-content: center;
+        gap: 0.45rem;
+        margin-top: 0.75rem;
+      }
+
+      .size-value {
+        color: var(--iris);
+        font-family: var(--font-mono);
+        font-size: 0.92rem;
+      }
+
+      .size-label {
+        color: var(--cream-dim);
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+      }
+
+      .hero .code {
+        display: inline-block;
+        max-width: calc(100vw - 2.5rem);
+        margin-top: 2.5rem;
+        text-align: left;
+      }
+
+      .hero-scroll {
+        position: relative;
+        margin-top: 3.5rem;
+        color: var(--text-dim);
+        font-family: var(--font-mono);
+        font-size: 0.78rem;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+      }
+
+      .hero-scroll::after {
+        content: "";
+        display: block;
+        width: 1px;
+        height: 56px;
+        margin: 1rem auto 0;
+        background: linear-gradient(var(--iris-dim), transparent);
+      }
+
+      /* ---- Sections ---- */
+      .demo-section {
+        position: relative;
+        padding: 18vh 0;
+        border-top: 1px solid var(--border);
+      }
+
+      .demo-header {
+        max-width: 68ch;
+        margin-bottom: 3rem;
+      }
+
+      .demo-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin-bottom: 1.1rem;
+      }
+
+      .demo-tag {
+        padding: 0.3em 0.85em;
+        color: var(--iris);
+        background: rgba(160, 140, 255, 0.07);
+        border: 1px solid var(--border-accent);
+        border-radius: 100px;
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .demo-tag.alt {
+        color: var(--rose);
+        background: rgba(240, 160, 192, 0.07);
+      }
+
+      .demo-section h2 {
+        margin-bottom: 0.9rem;
+        color: var(--cream);
+        font-family: var(--font-display);
+        font-size: clamp(2.2rem, 5vw, 3.4rem);
+        font-weight: 300;
+        letter-spacing: -0.02em;
+        line-height: 1.05;
+      }
+
+      .demo-desc {
+        color: var(--text-dim);
+        font-size: 1.05rem;
+        line-height: 1.75;
+        text-wrap: pretty;
+      }
+
+      /* ---- Cards ---- */
+      .grid {
+        display: grid;
+        gap: 1rem;
+        grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+      }
+
+      .family-label {
+        margin: 3.5rem 0 1rem;
+        font-family: var(--mono, monospace);
+        font-size: 0.72rem;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--text-dim, #888);
+      }
+
+      .family-label:first-of-type {
+        margin-top: 0;
+      }
+
+      .card {
+        padding: 1.6rem 1.5rem;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        transition:
+          border-color 0.4s ease,
+          background 0.4s ease;
+      }
+
+      .card:hover {
+        background: var(--bg-card-hover);
+        border-color: var(--border-accent);
+      }
+
+      .card h3 {
+        margin-bottom: 0.35rem;
+        color: var(--cream);
+        font-family: var(--font-display);
+        font-size: 1.5rem;
+        font-weight: 400;
+        letter-spacing: -0.01em;
+      }
+
+      .card p {
+        color: var(--text-dim);
+        font-size: 0.92rem;
+        line-height: 1.6;
+      }
+
+      .card code {
+        display: block;
+        margin-top: 0.7rem;
+        color: var(--iris);
+        font-size: 0.78rem;
+        word-break: break-word;
+      }
+
+      /* ---- Stagger grid ---- */
+      .stagger {
+        display: grid;
+        gap: 0.6rem;
+        grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+      }
+
+      .stagger span {
+        display: block;
+        aspect-ratio: 1;
+        border-radius: 10px;
+        background: linear-gradient(
+          150deg,
+          var(--bg-card-hover),
+          var(--bg-card)
+        );
+        border: 1px solid var(--border);
+      }
+
+      .stagger span:nth-child(3n) {
+        border-color: var(--border-accent);
+      }
+
+      .stagger span:nth-child(4n) {
+        background: linear-gradient(
+          150deg,
+          rgba(160, 140, 255, 0.16),
+          var(--bg-card)
+        );
+      }
+
+      /* ---- Anchor band ---- */
+      .band {
+        position: relative;
+        padding: 3rem;
+        background:
+          radial-gradient(
+            120% 140% at 50% 0%,
+            rgba(160, 140, 255, 0.1),
+            transparent 60%
+          ),
+          var(--bg-well);
+        border: 1px solid var(--border-accent);
+        border-radius: 20px;
+      }
+
+      .band-label {
+        display: block;
+        margin-bottom: 2rem;
+        color: var(--iris);
+        font-family: var(--font-mono);
+        font-size: 0.78rem;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+
+      .band .grid {
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      }
+
+      .band .card {
+        background: rgba(255, 255, 255, 0.02);
+      }
+
+      /* ---- Trigger-line guides ----
+			   Shown only while the placements section holds the viewport: two
+			   markers inside it flip .is-revealed as it enters and leaves, and
+			   :has() reads that state without a line of JavaScript. */
+      .guides {
+        position: fixed;
+        inset: 0;
+        z-index: 300;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.5s ease;
+      }
+
+      body:has(#guides-on.is-revealed):not(:has(#guides-off.is-revealed))
+        .guides {
+        opacity: 1;
+      }
+
+      .guide {
+        position: absolute;
+        left: 0;
+        right: 0;
+        border-top: 1px dashed rgba(160, 140, 255, 0.5);
+      }
+
+      .guide i {
+        position: absolute;
+        right: 1rem;
+        top: 0.4rem;
+        color: var(--iris);
+        font-family: var(--font-mono);
+        font-size: 0.68rem;
+        font-style: normal;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .guide-bottom {
+        bottom: 0;
+      }
+      .guide-bottom i {
+        top: auto;
+        bottom: 0.4rem;
+      }
+      .guide-center {
+        top: 50%;
+      }
+      .guide-top {
+        top: 0;
+      }
+
+      .marker {
+        display: block;
+        height: 1px;
+      }
+
+      /* ---- Placement columns ---- */
+      .columns {
+        display: grid;
+        gap: 1rem;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      }
+
+      .column {
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+        min-height: 62vh;
+        padding: 1.6rem;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+      }
+
+      .column h3 {
+        color: var(--cream);
+        font-family: var(--font-mono);
+        font-size: 0.95rem;
+        letter-spacing: 0.04em;
+      }
+
+      .column p {
+        margin-top: 0.4rem;
+        color: var(--text-dim);
+        font-size: 0.88rem;
+        line-height: 1.6;
+      }
+
+      /* ---- Code block ---- */
+      .code {
+        margin-top: 2rem;
+        padding: 1.4rem 1.6rem;
+        overflow-x: auto;
+        background: var(--bg-well);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        color: var(--cream-dim);
+        font-family: var(--font-mono);
+        font-size: 0.84rem;
+        line-height: 1.8;
+        white-space: pre;
+      }
+
+      .code b {
+        color: var(--iris);
+        font-weight: 400;
+      }
+
+      .code span {
+        color: var(--text-dim);
+      }
+
+      /* ---- Attribute reference ---- */
+      .attr-scroll {
+        margin-top: 2.5rem;
+        overflow-x: auto;
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        background: var(--bg-well);
+      }
+
+      .attr-table {
+        width: 100%;
+        min-width: 44rem;
+        border-collapse: collapse;
+        text-align: left;
+      }
+
+      .attr-table th {
+        padding: 1rem 1.4rem;
+        color: var(--text-dim);
+        font-family: var(--font-mono);
+        font-size: 0.7rem;
+        font-weight: 400;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .attr-table td {
+        padding: 0.95rem 1.4rem;
+        color: var(--text-dim);
+        font-size: 0.95rem;
+        line-height: 1.6;
+        vertical-align: top;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .attr-table tr:last-child td {
+        border-bottom: 0;
+      }
+
+      .attr-table td:first-child code {
+        color: var(--iris);
+        white-space: nowrap;
+      }
+
+      .attr-table td:nth-child(2) {
+        white-space: nowrap;
+        color: var(--cream-dim);
+        font-family: var(--font-mono);
+        font-size: 0.82rem;
+      }
+
+      .attr-req {
+        margin-left: 0.5rem;
+        padding: 0.1em 0.5em;
+        border: 1px solid var(--border-accent);
+        border-radius: 100px;
+        color: var(--rose);
+        font-family: var(--font-body);
+        font-size: 0.62rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        vertical-align: middle;
+      }
+
+      /* ---- Note ---- */
+      .note {
+        padding: 2rem;
+        background: var(--bg-well);
+        border: 1px solid var(--border-accent);
+        border-left: 2px solid var(--iris-dim);
+        border-radius: 14px;
+      }
+
+      .note strong {
+        display: block;
+        margin-bottom: 0.5rem;
+        color: var(--cream);
+        font-weight: 400;
+      }
+
+      .note p {
+        color: var(--text-dim);
+        line-height: 1.75;
+      }
+
+      .note p + p {
+        margin-top: 0.8rem;
+      }
+
+      /* ---- HUD ---- */
+      .hud {
+        position: fixed;
+        right: 1.25rem;
+        bottom: 1.25rem;
+        z-index: 500;
+        display: flex;
+        flex-direction: column;
+        gap: 0.7rem;
+        width: 15.5rem;
+        padding: 0.9rem 1rem;
+        background: rgba(11, 10, 18, 0.88);
+        border: 1px solid var(--border-accent);
+        border-radius: 12px;
+        backdrop-filter: blur(8px);
+        font-family: var(--font-mono);
+        font-size: 0.72rem;
+        letter-spacing: 0.06em;
+      }
+
+      .hud-row {
+        display: flex;
+        justify-content: space-between;
+        color: var(--text-dim);
+      }
+
+      .hud-row b {
+        color: var(--iris);
+        font-weight: 400;
+      }
+
+      .hud-bar {
+        height: 3px;
+        border-radius: 3px;
+        background: var(--border);
+        overflow: hidden;
+      }
+
+      .hud-bar i {
+        display: block;
+        height: 100%;
+        width: 0;
+        background: var(--iris);
+        transition: width 0.25s ease;
+      }
+
+      .hud-buttons {
+        display: flex;
+        gap: 0.4rem;
+      }
+
+      .hud button {
+        flex: 1;
+        padding: 0.45em 0.2em;
+        color: var(--cream-dim);
+        background: transparent;
+        border: 1px solid var(--border-accent);
+        border-radius: 7px;
+        font: inherit;
+        cursor: pointer;
+        transition:
+          color 0.25s ease,
+          border-color 0.25s ease;
+      }
+
+      .hud button:hover {
+        color: var(--iris);
+        border-color: var(--iris-dim);
+      }
+
+      /* ---- Footer ---- */
+      footer {
+        padding: 14vh 0 8rem;
+        border-top: 1px solid var(--border);
+        text-align: center;
+      }
+
+      footer h2 {
+        margin-bottom: 1.2rem;
+        color: var(--cream);
+        font-family: var(--font-display);
+        font-size: clamp(2rem, 5vw, 3rem);
+        font-weight: 300;
+      }
+
+      footer .code {
+        display: inline-block;
+        margin-inline: auto;
+        text-align: left;
+      }
+
+      footer p {
+        margin-top: 2rem;
+        color: var(--text-dim);
+        font-size: 0.9rem;
+      }
+
+      footer a {
+        color: var(--iris);
+      }
+
+      @media (max-width: 640px) {
+        .hud {
+          right: 0.75rem;
+          bottom: 0.75rem;
+          width: 12.5rem;
+        }
+
+        .demo-section {
+          padding: 12vh 0;
+        }
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="guides" aria-hidden="true">
+      <span class="guide guide-top"><i>viewport top</i></span>
+      <span class="guide guide-center"><i>viewport center</i></span>
+      <span class="guide guide-bottom"><i>viewport bottom</i></span>
+    </div>
+
+    <header class="hero">
+      <div class="hero-mark" aria-hidden="true">
+        <i class="reveal reveal-fade-right"></i>
+        <i class="reveal reveal-fade-right reveal-delay-150"></i>
+        <i class="reveal reveal-fade-right reveal-delay-250"></i>
+      </div>
+
+      <a
+        class="hero-badge reveal reveal-fade reveal-delay-400"
+        href="https://github.com/magic-spells/reveal"
+        target="_blank"
+        rel="noopener"
+        >@magic-spells/reveal</a
+      >
+
+      <h1 class="reveal reveal-fade-up reveal-delay-200">
+        Content that <em>arrives</em>
+      </h1>
+
+      <p class="hero-tagline reveal reveal-fade-up reveal-delay-300">
+        CSS-driven scroll reveals. 32 effects, 9 anchor placements, zero
+        dependencies. Everything below uses the library.
+      </p>
+
+      <div class="hero-install reveal reveal-fade-up reveal-delay-400">
+        <span class="install-label" id="install-label">Install</span>
+        <code class="install-value" id="install-value" title="Click to copy"
+          >npm install @magic-spells/reveal</code
+        >
+        <!-- reveal.min.js plus reveal.min.css, each gzipped on its own the
+				     way a CDN serves them. -->
+        <div class="size-note">
+          <span class="size-value">5.3 kB</span>
+          <span class="size-label">min + gzip, js + css</span>
+        </div>
+      </div>
+
+      <div class="code reveal reveal-fade-up reveal-delay-500">
+        <span>// app.js — no pre-paint snippet, no head tag</span>
+        import Reveal from <b>'@magic-spells/reveal'</b>; import
+        <b>'@magic-spells/reveal/css'</b>; Reveal.<b>init</b>({ offset: 120,
+        once: true });
+      </div>
+
+      <div class="hero-scroll reveal reveal-fade reveal-delay-600">scroll</div>
+    </header>
+
+    <main>
+      <section class="demo-section">
+        <div class="wrap">
+          <div class="demo-header">
+            <div class="demo-tags">
+              <span class="demo-tag">the whole api</span>
+              <span class="demo-tag">classes + four attributes</span>
+            </div>
+            <h2 class="reveal reveal-fade-up">Everything you can write</h2>
+            <p class="demo-desc reveal reveal-fade-up reveal-delay-100">
+              Classes control the look, data attributes control the behavior.
+              Each attribute overrides the matching <code>init()</code> option
+              for that element.
+            </p>
+          </div>
+
+          <div class="attr-scroll reveal reveal-fade-up reveal-delay-150">
+            <table class="attr-table">
+              <thead>
+                <tr>
+                  <th scope="col">Attribute</th>
+                  <th scope="col">Value</th>
+                  <th scope="col">What it does</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>
+                    <code>reveal</code><span class="attr-req">required</span>
+                  </td>
+                  <td>marker</td>
+                  <td>
+                    Marks the element for observation. Effect classes do nothing
+                    without it.
+                  </td>
+                </tr>
+                <tr>
+                  <td><code>reveal-&lt;effect&gt;</code></td>
+                  <td>effect</td>
+                  <td>
+                    <code>reveal-fade</code>, <code>reveal-fade-up</code>,
+                    <code>reveal-fade-down</code>,
+                    <code>reveal-fade-left</code>,
+                    <code>reveal-fade-right</code>,
+                    <code>reveal-fade-up-right</code>,
+                    <code>reveal-fade-up-left</code>,
+                    <code>reveal-fade-down-right</code>,
+                    <code>reveal-fade-down-left</code>,
+                    <code>reveal-slide-up</code>,
+                    <code>reveal-slide-down</code>,
+                    <code>reveal-slide-left</code>,
+                    <code>reveal-slide-right</code>,
+                    <code>reveal-flip-up</code>, <code>reveal-flip-down</code>,
+                    <code>reveal-flip-left</code>,
+                    <code>reveal-flip-right</code>, <code>reveal-zoom-in</code>,
+                    <code>reveal-zoom-in-up</code>,
+                    <code>reveal-zoom-in-down</code>,
+                    <code>reveal-zoom-in-left</code>,
+                    <code>reveal-zoom-in-right</code>,
+                    <code>reveal-zoom-out</code>,
+                    <code>reveal-zoom-out-up</code>,
+                    <code>reveal-zoom-out-down</code>,
+                    <code>reveal-zoom-out-left</code>,
+                    <code>reveal-zoom-out-right</code>,
+                    <code>reveal-bloom-in</code>,
+                    <code>reveal-bloom-in-up</code>,
+                    <code>reveal-bloom-in-down</code>,
+                    <code>reveal-bloom-in-left</code>,
+                    <code>reveal-bloom-in-right</code>. Defaults to a plain
+                    fade.
+                  </td>
+                </tr>
+                <tr>
+                  <td><code>reveal-delay-&lt;ms&gt;</code></td>
+                  <td>0–1000, step 50</td>
+                  <td>
+                    Transition delay. Other values:
+                    <code>.reveal-delay-90 { --reveal-delay: 90ms }</code>.
+                  </td>
+                </tr>
+                <tr>
+                  <td><code>reveal-duration-&lt;ms&gt;</code></td>
+                  <td>100–2000, step 100</td>
+                  <td>Transition duration.</td>
+                </tr>
+                <tr>
+                  <td><code>reveal-ease-&lt;name&gt;</code></td>
+                  <td>
+                    <code>linear</code>, <code>in</code>, <code>out</code>,
+                    <code>in-out</code>, <code>spring</code>
+                  </td>
+                  <td>
+                    Easing. Custom:
+                    <code>style="--reveal-easing: cubic-bezier(…)"</code>.
+                  </td>
+                </tr>
+                <tr>
+                  <td><code>data-reveal-offset</code></td>
+                  <td>px or %</td>
+                  <td>
+                    Trigger distance above the viewport edge. Overrides the
+                    global <code>offset</code>.
+                  </td>
+                </tr>
+                <tr>
+                  <td><code>data-reveal-once</code></td>
+                  <td>true / false</td>
+                  <td>
+                    Reveal once, or re-hide on every crossing. Overrides the
+                    global <code>once</code>.
+                  </td>
+                </tr>
+                <tr>
+                  <td><code>data-reveal-anchor</code></td>
+                  <td>CSS selector</td>
+                  <td>
+                    Use another element as the trigger. Elements sharing an
+                    anchor reveal together.
+                  </td>
+                </tr>
+                <tr>
+                  <td><code>data-reveal-anchor-placement</code></td>
+                  <td>placement</td>
+                  <td>
+                    Which trigger edge meets which viewport edge —
+                    <code>top-bottom</code>, <code>center-center</code>, etc.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="code reveal reveal-fade-up reveal-delay-200">
+            &lt;div class="<b
+              >reveal reveal-fade-up reveal-delay-150 reveal-duration-800
+              reveal-ease-spring</b
+            >" <b>data-reveal-offset</b>="20%"
+            <b>data-reveal-once</b>="false"&gt; … &lt;/div&gt;
+          </div>
+        </div>
+      </section>
+
+      <section class="demo-section">
+        <div class="wrap">
+          <div class="demo-header">
+            <div class="demo-tags">
+              <span class="demo-tag">thirty-two effects</span>
+              <span class="demo-tag">one class each</span>
+            </div>
+            <h2 class="reveal reveal-fade-up">Each card is its own effect</h2>
+            <p class="demo-desc reveal reveal-fade-up reveal-delay-100">
+              Each effect is a CSS resting state the element transitions out of.
+              The JS only adds <code>is-revealed</code> — CSS does the rest.
+            </p>
+          </div>
+
+          <p class="family-label reveal reveal-fade">fade</p>
+          <div class="grid">
+            <div class="card reveal reveal-fade">
+              <h3>Fade</h3>
+              <p>Opacity only.</p>
+              <code>reveal-fade</code>
+            </div>
+            <div class="card reveal reveal-fade-up">
+              <h3>Fade up</h3>
+              <p>Rises into place from below.</p>
+              <code>reveal-fade-up</code>
+            </div>
+            <div class="card reveal reveal-fade-down">
+              <h3>Fade down</h3>
+              <p>Settles down from above.</p>
+              <code>reveal-fade-down</code>
+            </div>
+            <div class="card reveal reveal-fade-left">
+              <h3>Fade left</h3>
+              <p>Travels in from the right.</p>
+              <code>reveal-fade-left</code>
+            </div>
+            <div class="card reveal reveal-fade-right">
+              <h3>Fade right</h3>
+              <p>Travels in from the left.</p>
+              <code>reveal-fade-right</code>
+            </div>
+          </div>
+
+          <p class="family-label reveal reveal-fade">diagonal</p>
+          <div class="grid">
+            <div class="card reveal reveal-fade-up-right">
+              <h3>Fade up right</h3>
+              <p>Arrives from the lower left.</p>
+              <code>reveal-fade-up-right</code>
+            </div>
+            <div class="card reveal reveal-fade-up-left">
+              <h3>Fade up left</h3>
+              <p>Arrives from the lower right.</p>
+              <code>reveal-fade-up-left</code>
+            </div>
+            <div class="card reveal reveal-fade-down-right">
+              <h3>Fade down right</h3>
+              <p>Arrives from the upper left.</p>
+              <code>reveal-fade-down-right</code>
+            </div>
+            <div class="card reveal reveal-fade-down-left">
+              <h3>Fade down left</h3>
+              <p>Arrives from the upper right.</p>
+              <code>reveal-fade-down-left</code>
+            </div>
+          </div>
+
+          <p class="family-label reveal reveal-fade">slide</p>
+          <div class="grid">
+            <div class="card reveal reveal-slide-up">
+              <h3>Slide up</h3>
+              <p>Moves up, no fade.</p>
+              <code>reveal-slide-up</code>
+            </div>
+            <div class="card reveal reveal-slide-down">
+              <h3>Slide down</h3>
+              <p>Moves down, no fade.</p>
+              <code>reveal-slide-down</code>
+            </div>
+            <div class="card reveal reveal-slide-left">
+              <h3>Slide left</h3>
+              <p>In from the right, no fade.</p>
+              <code>reveal-slide-left</code>
+            </div>
+            <div class="card reveal reveal-slide-right">
+              <h3>Slide right</h3>
+              <p>In from the left, no fade.</p>
+              <code>reveal-slide-right</code>
+            </div>
+          </div>
+
+          <p class="family-label reveal reveal-fade">flip</p>
+          <div class="grid">
+            <div class="card reveal reveal-flip-up">
+              <h3>Flip up</h3>
+              <p>Hinges forward on its bottom edge.</p>
+              <code>reveal-flip-up</code>
+            </div>
+            <div class="card reveal reveal-flip-down">
+              <h3>Flip down</h3>
+              <p>Hinges back on its top edge.</p>
+              <code>reveal-flip-down</code>
+            </div>
+            <div class="card reveal reveal-flip-left">
+              <h3>Flip left</h3>
+              <p>Swings around its left edge.</p>
+              <code>reveal-flip-left</code>
+            </div>
+            <div class="card reveal reveal-flip-right">
+              <h3>Flip right</h3>
+              <p>Swings around its right edge.</p>
+              <code>reveal-flip-right</code>
+            </div>
+          </div>
+
+          <p class="family-label reveal reveal-fade">zoom in</p>
+          <div class="grid">
+            <div class="card reveal reveal-zoom-in">
+              <h3>Zoom in</h3>
+              <p>Scales up into place.</p>
+              <code>reveal-zoom-in</code>
+            </div>
+            <div class="card reveal reveal-zoom-in-up">
+              <h3>Zoom in up</h3>
+              <p>Grows while it rises.</p>
+              <code>reveal-zoom-in-up</code>
+            </div>
+            <div class="card reveal reveal-zoom-in-down">
+              <h3>Zoom in down</h3>
+              <p>Grows on the way down.</p>
+              <code>reveal-zoom-in-down</code>
+            </div>
+            <div class="card reveal reveal-zoom-in-left">
+              <h3>Zoom in left</h3>
+              <p>Grows in from the right.</p>
+              <code>reveal-zoom-in-left</code>
+            </div>
+            <div class="card reveal reveal-zoom-in-right">
+              <h3>Zoom in right</h3>
+              <p>Grows in from the left.</p>
+              <code>reveal-zoom-in-right</code>
+            </div>
+          </div>
+
+          <p class="family-label reveal reveal-fade">zoom out</p>
+          <div class="grid">
+            <div class="card reveal reveal-zoom-out">
+              <h3>Zoom out</h3>
+              <p>Scales down into place.</p>
+              <code>reveal-zoom-out</code>
+            </div>
+            <div class="card reveal reveal-zoom-out-up">
+              <h3>Zoom out up</h3>
+              <p>Scales down while rising.</p>
+              <code>reveal-zoom-out-up</code>
+            </div>
+            <div class="card reveal reveal-zoom-out-down">
+              <h3>Zoom out down</h3>
+              <p>Scales down while descending.</p>
+              <code>reveal-zoom-out-down</code>
+            </div>
+            <div class="card reveal reveal-zoom-out-left">
+              <h3>Zoom out left</h3>
+              <p>Scales down from the right.</p>
+              <code>reveal-zoom-out-left</code>
+            </div>
+            <div class="card reveal reveal-zoom-out-right">
+              <h3>Zoom out right</h3>
+              <p>Scales down from the left.</p>
+              <code>reveal-zoom-out-right</code>
+            </div>
+          </div>
+
+          <p class="family-label reveal reveal-fade">bloom</p>
+          <div class="grid">
+            <div class="card reveal reveal-bloom-in">
+              <h3>Bloom in</h3>
+              <p>Blur to sharp, scaling up.</p>
+              <code>reveal-bloom-in</code>
+            </div>
+            <div class="card reveal reveal-bloom-in-up">
+              <h3>Bloom in up</h3>
+              <p>Rises out of a blur.</p>
+              <code>reveal-bloom-in-up</code>
+            </div>
+            <div class="card reveal reveal-bloom-in-down">
+              <h3>Bloom in down</h3>
+              <p>Descends into focus.</p>
+              <code>reveal-bloom-in-down</code>
+            </div>
+            <div class="card reveal reveal-bloom-in-left">
+              <h3>Bloom in left</h3>
+              <p>Blurred in from the right.</p>
+              <code>reveal-bloom-in-left</code>
+            </div>
+            <div class="card reveal reveal-bloom-in-right">
+              <h3>Bloom in right</h3>
+              <p>Blurred in from the left.</p>
+              <code>reveal-bloom-in-right</code>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="demo-section">
+        <div class="wrap">
+          <div class="demo-header">
+            <div class="demo-tags">
+              <span class="demo-tag">one crossing</span>
+              <span class="demo-tag alt">twelve delays</span>
+            </div>
+            <h2 class="reveal reveal-fade-up">A cascade is just delays</h2>
+            <p class="demo-desc reveal reveal-fade-up reveal-delay-100">
+              All twelve tiles share one anchor and fire at the same instant —
+              the stagger is just a <code>reveal-delay-*</code> class per tile.
+            </p>
+          </div>
+
+          <div class="stagger" id="cascade">
+            <span
+              class="reveal reveal-zoom-in"
+              data-reveal-anchor="#cascade"
+            ></span>
+            <span
+              class="reveal reveal-zoom-in reveal-delay-50"
+              data-reveal-anchor="#cascade"
+            ></span>
+            <span
+              class="reveal reveal-zoom-in reveal-delay-100"
+              data-reveal-anchor="#cascade"
+            ></span>
+            <span
+              class="reveal reveal-zoom-in reveal-delay-200"
+              data-reveal-anchor="#cascade"
+            ></span>
+            <span
+              class="reveal reveal-zoom-in reveal-delay-250"
+              data-reveal-anchor="#cascade"
+            ></span>
+            <span
+              class="reveal reveal-zoom-in reveal-delay-300"
+              data-reveal-anchor="#cascade"
+            ></span>
+            <span
+              class="reveal reveal-zoom-in reveal-delay-350"
+              data-reveal-anchor="#cascade"
+            ></span>
+            <span
+              class="reveal reveal-zoom-in reveal-delay-400"
+              data-reveal-anchor="#cascade"
+            ></span>
+            <span
+              class="reveal reveal-zoom-in reveal-delay-500"
+              data-reveal-anchor="#cascade"
+            ></span>
+            <span
+              class="reveal reveal-zoom-in reveal-delay-550"
+              data-reveal-anchor="#cascade"
+            ></span>
+            <span
+              class="reveal reveal-zoom-in reveal-delay-600"
+              data-reveal-anchor="#cascade"
+            ></span>
+            <span
+              class="reveal reveal-zoom-in reveal-delay-650"
+              data-reveal-anchor="#cascade"
+            ></span>
+          </div>
+
+          <div class="code">
+            <span>&lt;div class="grid" <b>id="cascade"</b>&gt;</span>
+            &lt;span class="<b>reveal reveal-zoom-in</b>"
+            <b>data-reveal-anchor</b>="#cascade"&gt;&lt;/span&gt; &lt;span
+            class="<b>reveal reveal-zoom-in reveal-delay-50</b>"
+            <b>data-reveal-anchor</b>="#cascade"&gt;&lt;/span&gt; &lt;span
+            class="<b>reveal reveal-zoom-in reveal-delay-100</b>"
+            <b>data-reveal-anchor</b>="#cascade"&gt;&lt;/span&gt;
+            <span>&lt;/div&gt;</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="demo-section">
+        <div class="wrap">
+          <div class="demo-header">
+            <div class="demo-tags">
+              <span class="demo-tag">anchor groups</span>
+            </div>
+            <h2 class="reveal reveal-fade-up">Three cards, one trigger</h2>
+            <p class="demo-desc reveal reveal-fade-up reveal-delay-100">
+              These cards use the band as their trigger via
+              <code>data-reveal-anchor</code>, and
+              <code>center-center</code> waits until the band's middle hits the
+              viewport's middle — so they arrive as a set.
+            </p>
+          </div>
+
+          <div class="band" id="band">
+            <span
+              class="band-label reveal reveal-fade"
+              data-reveal-anchor="#band"
+              data-reveal-anchor-placement="center-center"
+            >
+              the anchor · center-center
+            </span>
+            <div class="grid">
+              <div
+                class="card reveal reveal-fade-up"
+                data-reveal-anchor="#band"
+                data-reveal-anchor-placement="center-center"
+              >
+                <h3>Basic</h3>
+                <p>Fires with the band, no delay.</p>
+                <code>delay: 0</code>
+              </div>
+              <div
+                class="card reveal reveal-fade-up reveal-delay-150"
+                data-reveal-anchor="#band"
+                data-reveal-anchor-placement="center-center"
+              >
+                <h3>Pro</h3>
+                <p>Same crossing, later paint.</p>
+                <code>delay: 150</code>
+              </div>
+              <div
+                class="card reveal reveal-fade-up reveal-delay-300"
+                data-reveal-anchor="#band"
+                data-reveal-anchor-placement="center-center"
+              >
+                <h3>Team</h3>
+                <p>Same crossing, later still.</p>
+                <code>delay: 300</code>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="demo-section">
+        <div class="wrap">
+          <div class="demo-header">
+            <div class="demo-tags">
+              <span class="demo-tag">nine placements</span>
+              <span class="demo-tag alt">watch the guides</span>
+            </div>
+            <h2 class="reveal reveal-fade-up">Where the line sits</h2>
+            <p class="demo-desc reveal reveal-fade-up reveal-delay-100">
+              A placement is
+              <code>&lt;element-edge&gt;-&lt;viewport-edge&gt;</code>. The
+              dashed guides are the viewport lines; each column waits for a
+              different one.
+            </p>
+          </div>
+
+          <span
+            class="marker reveal reveal-fade"
+            id="guides-on"
+            data-reveal-once="false"
+            data-reveal-offset="0"
+            aria-hidden="true"
+          ></span>
+
+          <div class="columns">
+            <div class="column reveal reveal-fade-up" data-reveal-offset="0">
+              <h3>top-bottom</h3>
+              <p>The default. Top edge enters at the bottom.</p>
+            </div>
+            <div
+              class="column reveal reveal-fade-up"
+              data-reveal-offset="0"
+              data-reveal-anchor-placement="top-center"
+            >
+              <h3>top-center</h3>
+              <p>Top edge reaches the halfway line.</p>
+            </div>
+            <div
+              class="column reveal reveal-fade-up"
+              data-reveal-offset="0"
+              data-reveal-anchor-placement="bottom-center"
+            >
+              <h3>bottom-center</h3>
+              <p>Bottom edge reaches the halfway line.</p>
+            </div>
+          </div>
+        </div>
+        <span
+          class="marker reveal reveal-fade"
+          id="guides-off"
+          data-reveal-once="false"
+          data-reveal-offset="0"
+          aria-hidden="true"
+        ></span>
+      </section>
+
+      <section class="demo-section">
+        <div class="wrap">
+          <div class="demo-header">
+            <div class="demo-tags">
+              <span class="demo-tag">once: false</span>
+            </div>
+            <h2 class="reveal reveal-fade-up">Scroll back up</h2>
+            <p class="demo-desc reveal reveal-fade-up reveal-delay-100">
+              With <code>data-reveal-once="false"</code>, these cards hide again
+              when they scroll back past their line and replay on the way down.
+            </p>
+          </div>
+
+          <div class="grid">
+            <div class="card reveal reveal-zoom-out" data-reveal-once="false">
+              <h3>Again</h3>
+              <p>Reverses when it leaves.</p>
+              <code>data-reveal-once="false"</code>
+            </div>
+            <div
+              class="card reveal reveal-fade-down reveal-delay-100"
+              data-reveal-once="false"
+            >
+              <h3>And again</h3>
+              <p>The delay applies both ways.</p>
+              <code>delay: 100</code>
+            </div>
+            <div
+              class="card reveal reveal-fade-left reveal-delay-200"
+              data-reveal-once="false"
+            >
+              <h3>And again</h3>
+              <p>Still one observer for all four.</p>
+              <code>reveal-delay-200</code>
+            </div>
+            <div
+              class="card reveal reveal-fade-up reveal-delay-250"
+              data-reveal-once="false"
+            >
+              <h3>And again</h3>
+              <p>Grouped by offset, once and placement.</p>
+              <code>reveal-delay-250</code>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="demo-section">
+        <div class="wrap">
+          <div class="demo-header">
+            <div class="demo-tags">
+              <span class="demo-tag">timing</span>
+              <span class="demo-tag alt">custom properties</span>
+            </div>
+            <h2 class="reveal reveal-fade-up">
+              Duration and easing, per element
+            </h2>
+            <p class="demo-desc reveal reveal-fade-up reveal-delay-100">
+              Timing classes set custom properties —
+              <code>--reveal-duration</code>, <code>--reveal-delay</code>,
+              <code>--reveal-easing</code>. Any CSS easing works via the
+              property.
+            </p>
+          </div>
+
+          <div class="grid">
+            <div class="card reveal reveal-fade-up reveal-duration-1800">
+              <h3>Slow</h3>
+              <p>Nearly two seconds of travel.</p>
+              <code>reveal-duration-1800</code>
+            </div>
+            <div class="card reveal reveal-fade-up reveal-duration-300">
+              <h3>Brisk</h3>
+              <p>In and done.</p>
+              <code>reveal-duration-300</code>
+            </div>
+            <div
+              style="--reveal-easing: cubic-bezier(0.68, -0.55, 0.27, 1.75)"
+              class="card reveal reveal-fade-left"
+            >
+              <h3>Overshoot</h3>
+              <p>Sails past and comes back.</p>
+              <code>--reveal-easing: cubic-bezier(…)</code>
+            </div>
+            <div
+              class="card reveal reveal-fade-up reveal-duration-900 reveal-ease-linear"
+            >
+              <h3>Linear</h3>
+              <p>No easing at all, for contrast.</p>
+              <code>reveal-ease-linear</code>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="wrap">
+        <p class="reveal reveal-fade">
+          <a href="https://github.com/magic-spells/reveal"
+            >github.com/magic-spells/reveal</a
+          >
+          · MIT
+        </p>
+      </div>
+    </footer>
+
+    <div class="hud">
+      <div class="hud-row">
+        <span>revealed</span><b id="hud-count">0 / 0</b>
+      </div>
+      <div class="hud-bar"><i id="hud-bar"></i></div>
+      <div class="hud-row"><span>state</span><b id="hud-state">armed</b></div>
+      <div class="hud-buttons">
+        <button id="btn-destroy" type="button">destroy</button>
+        <button id="btn-init" type="button">init</button>
+        <button id="btn-add" type="button">add</button>
+      </div>
+    </div>
+
+    <script type="module">
+      import Reveal from "./reveal.esm.js";
+
+      const options = { offset: 140, duration: 700, once: true };
+      Reveal.init(options);
+
+      // ---- HUD ----
+      const countEl = document.getElementById("hud-count");
+      const barEl = document.getElementById("hud-bar");
+      const stateEl = document.getElementById("hud-state");
+      let frame = null;
+
+      const sync = () => {
+        frame = null;
+        const all = document.querySelectorAll(".reveal");
+        const shown = document.querySelectorAll(".reveal.is-revealed");
+        countEl.textContent = `${shown.length} / ${all.length}`;
+        barEl.style.width = all.length
+          ? `${Math.round((shown.length / all.length) * 100)}%`
+          : "0%";
+      };
+
+      const schedule = () => {
+        if (frame === null) frame = requestAnimationFrame(sync);
+      };
+
+      window.addEventListener("scroll", schedule, { passive: true });
+      window.addEventListener("resize", schedule, { passive: true });
+      sync();
+
+      // ---- Teardown controls ----
+      document.getElementById("btn-destroy").addEventListener("click", () => {
+        Reveal.destroy();
+        stateEl.textContent = "destroyed";
+        schedule();
+      });
+
+      document.getElementById("btn-init").addEventListener("click", () => {
+        Reveal.init(options);
+        stateEl.textContent = "armed";
+        schedule();
+      });
+
+      let added = 0;
+      document.getElementById("btn-add").addEventListener("click", () => {
+        added += 1;
+        const card = document.createElement("div");
+        card.className = "card reveal reveal-zoom-in";
+        card.innerHTML = `<h3>Added ${added}</h3><p>Armed by refreshHard().</p><code>refreshHard()</code>`;
+        document.querySelector(".grid").appendChild(card);
+        Reveal.refreshHard();
+        stateEl.textContent = "refreshed";
+        schedule();
+      });
+
+      // ---- Click to copy the install command ----
+      const install = document.querySelector(".hero-install");
+      const installValue = document.getElementById("install-value");
+      const installLabel = document.getElementById("install-label");
+      let copiedTimer;
+
+      installValue.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(installValue.textContent.trim());
+          install.classList.add("copied");
+          installLabel.textContent = "Copied";
+          clearTimeout(copiedTimer);
+          copiedTimer = setTimeout(() => {
+            install.classList.remove("copied");
+            installLabel.textContent = "Install";
+          }, 1600);
+        } catch {
+          /* clipboard denied — the text is user-select:all, so select it instead */
+        }
+      });
+
+      window.Reveal = Reveal;
+    </script>
+  </body>
+</html>

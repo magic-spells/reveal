@@ -1,0 +1,74 @@
+{
+  "name": "@magic-spells/reveal",
+  "version": "0.1.0",
+  "description": "Class-driven scroll reveals on IntersectionObserver",
+  "author": "Cory Schulz",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/reveal.esm.js",
+  "module": "dist/reveal.esm.js",
+  "unpkg": "dist/reveal.min.js",
+  "style": "dist/reveal.min.css",
+  "exports": {
+    ".": {
+      "import": "./dist/reveal.esm.js",
+      "default": "./dist/reveal.esm.js"
+    },
+    "./css": "./dist/reveal.css",
+    "./css/min": "./dist/reveal.min.css",
+    "./tailwind": "./dist/reveal.tailwind.css"
+  },
+  "sideEffects": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/magic-spells/reveal.git"
+  },
+  "homepage": "https://github.com/magic-spells/reveal#readme",
+  "bugs": {
+    "url": "https://github.com/magic-spells/reveal/issues"
+  },
+  "keywords": [
+    "reveal",
+    "scroll",
+    "animation",
+    "aos",
+    "intersection-observer",
+    "shopify"
+  ],
+  "files": [
+    "dist/"
+  ],
+  "scripts": {
+    "build": "rollup -c",
+    "lint": "eslint src/ test/ rollup.config.mjs",
+    "format": "prettier --write src demo/index.html rollup.config.mjs",
+    "prepublishOnly": "npm run build",
+    "serve": "rollup -c --watch",
+    "dev": "rollup -c --watch",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "browserslist": [
+    "last 2 versions",
+    "not dead",
+    "not ie <= 11"
+  ],
+  "devDependencies": {
+    "@eslint/js": "^8.57.0",
+    "@rollup/plugin-node-resolve": "^15.2.3",
+    "@rollup/plugin-terser": "^1.0.0",
+    "eslint": "^8.0.0",
+    "globals": "^13.24.0",
+    "jsdom": "^25.0.0",
+    "prettier": "^3.3.3",
+    "rollup": "^3.0.0",
+    "rollup-plugin-copy": "^3.5.0",
+    "rollup-plugin-postcss": "^4.0.2",
+    "rollup-plugin-serve": "^1.1.1",
+    "vitest": "^4.1.11"
+  }
+}

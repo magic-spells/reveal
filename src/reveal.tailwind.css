@@ -1,0 +1,362 @@
+/**
+ * Reveal - Tailwind v4 entry
+ *
+ *   @import "tailwindcss";
+ *   @import "@magic-spells/reveal/tailwind";
+ *
+ * Every rule here is a utility, so a project ships only the effects and
+ * timings it actually writes. Nothing is imported from reveal.css - that file
+ * is the enumerated build with the same class names, and loading both would
+ * ship each effect twice.
+ *
+ *   <div class="reveal reveal-fade-up reveal-delay-150">
+ *
+ * `reveal` is the marker. It carries the transition and the resting opacity,
+ * and it is the one thing the JavaScript queries for. An effect class on its
+ * own is never observed.
+ *
+ * Resting states are written `:not(.is-revealed)` rather than as a pair of
+ * rules. When the class lands the selector simply stops matching, so there is
+ * no override to out-rank - which matters here, because Tailwind orders
+ * utilities among themselves and source order cannot be relied on.
+ */
+
+@theme {
+  --reveal-duration: 0.6s;
+  --reveal-delay: 0s;
+  --reveal-easing: cubic-bezier(0.16, 1, 0.3, 1);
+  --reveal-distance: 24px;
+  --reveal-slide-distance: 100%;
+  --reveal-flip: 45deg;
+  --reveal-perspective: 1200px;
+  --reveal-blur: 4px;
+
+  /* Named easings. A project adds its own by declaring --reveal-ease-<name>. */
+  --reveal-ease-linear: linear;
+  --reveal-ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --reveal-ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --reveal-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --reveal-ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/**
+ * The marker. Required on every revealed element.
+ *
+ * The escape hatch and the reduced-motion block are nested here so they ship
+ * only when something on the page is actually revealing, and both are scoped
+ * under `html` so they out-rank an effect utility on specificity instead of
+ * on ordering.
+ */
+@utility reveal {
+  &:not(.reveal-done) {
+    transition:
+      opacity var(--reveal-duration, 0.6s)
+        var(--reveal-easing, cubic-bezier(0.16, 1, 0.3, 1))
+        var(--reveal-delay, 0s),
+      transform var(--reveal-duration, 0.6s)
+        var(--reveal-easing, cubic-bezier(0.16, 1, 0.3, 1))
+        var(--reveal-delay, 0s),
+      filter var(--reveal-duration, 0.6s)
+        var(--reveal-easing, cubic-bezier(0.16, 1, 0.3, 1))
+        var(--reveal-delay, 0s);
+  }
+
+  &:not(.is-revealed) {
+    opacity: 0;
+  }
+
+  /* init() adds reveal-off whenever it bails; destroy() adds it on the way
+     out. Nothing is left running to reveal anything, so show everything. */
+  html.reveal-off &:not(.is-revealed) {
+    opacity: 1;
+    transform: none;
+    filter: none;
+    transition: none;
+  }
+
+  /* Suppressed for a frame when init() re-arms, so nothing fades out */
+  html.reveal-no-transition & {
+    transition: none !important;
+  }
+
+  /* Needs no JavaScript, and applies before the bundle has loaded */
+  @media (prefers-reduced-motion: reduce) {
+    html &:not(.is-revealed) {
+      opacity: 1;
+      transform: none;
+      filter: none;
+      transition: none;
+    }
+  }
+}
+
+@utility reveal-fade {
+  &:not(.is-revealed) {
+    transform: none;
+  }
+}
+
+@utility reveal-fade-up {
+  &:not(.is-revealed) {
+    transform: translateY(var(--reveal-distance, 24px));
+  }
+}
+
+@utility reveal-fade-down {
+  &:not(.is-revealed) {
+    transform: translateY(calc(var(--reveal-distance, 24px) * -1));
+  }
+}
+
+@utility reveal-fade-left {
+  &:not(.is-revealed) {
+    transform: translateX(var(--reveal-distance, 24px));
+  }
+}
+
+@utility reveal-fade-right {
+  &:not(.is-revealed) {
+    transform: translateX(calc(var(--reveal-distance, 24px) * -1));
+  }
+}
+
+@utility reveal-fade-up-right {
+  &:not(.is-revealed) {
+    transform: translate(
+      calc(var(--reveal-distance, 24px) * -1),
+      var(--reveal-distance, 24px)
+    );
+  }
+}
+
+@utility reveal-fade-up-left {
+  &:not(.is-revealed) {
+    transform: translate(
+      var(--reveal-distance, 24px),
+      var(--reveal-distance, 24px)
+    );
+  }
+}
+
+@utility reveal-fade-down-right {
+  &:not(.is-revealed) {
+    transform: translate(
+      calc(var(--reveal-distance, 24px) * -1),
+      calc(var(--reveal-distance, 24px) * -1)
+    );
+  }
+}
+
+@utility reveal-fade-down-left {
+  &:not(.is-revealed) {
+    transform: translate(
+      var(--reveal-distance, 24px),
+      calc(var(--reveal-distance, 24px) * -1)
+    );
+  }
+}
+
+@utility reveal-slide-up {
+  &:not(.is-revealed) {
+    opacity: 1;
+    transform: translateY(var(--reveal-slide-distance, 100%));
+  }
+}
+
+@utility reveal-slide-down {
+  &:not(.is-revealed) {
+    opacity: 1;
+    transform: translateY(calc(var(--reveal-slide-distance, 100%) * -1));
+  }
+}
+
+@utility reveal-slide-left {
+  &:not(.is-revealed) {
+    opacity: 1;
+    transform: translateX(var(--reveal-slide-distance, 100%));
+  }
+}
+
+@utility reveal-slide-right {
+  &:not(.is-revealed) {
+    opacity: 1;
+    transform: translateX(calc(var(--reveal-slide-distance, 100%) * -1));
+  }
+}
+
+@utility reveal-flip-up {
+  &:not(.is-revealed) {
+    transform: perspective(var(--reveal-perspective, 1200px))
+      rotateX(calc(var(--reveal-flip, 45deg) * -1));
+  }
+}
+
+@utility reveal-flip-down {
+  &:not(.is-revealed) {
+    transform: perspective(var(--reveal-perspective, 1200px))
+      rotateX(var(--reveal-flip, 45deg));
+  }
+}
+
+@utility reveal-flip-left {
+  &:not(.is-revealed) {
+    transform: perspective(var(--reveal-perspective, 1200px))
+      rotateY(calc(var(--reveal-flip, 45deg) * -1));
+  }
+}
+
+@utility reveal-flip-right {
+  &:not(.is-revealed) {
+    transform: perspective(var(--reveal-perspective, 1200px))
+      rotateY(var(--reveal-flip, 45deg));
+  }
+}
+
+@utility reveal-zoom-in {
+  &:not(.is-revealed) {
+    transform: scale(0.92);
+  }
+}
+
+@utility reveal-zoom-in-up {
+  &:not(.is-revealed) {
+    transform: translateY(var(--reveal-distance, 24px)) scale(0.92);
+  }
+}
+
+@utility reveal-zoom-in-down {
+  &:not(.is-revealed) {
+    transform: translateY(calc(var(--reveal-distance, 24px) * -1)) scale(0.92);
+  }
+}
+
+@utility reveal-zoom-in-left {
+  &:not(.is-revealed) {
+    transform: translateX(var(--reveal-distance, 24px)) scale(0.92);
+  }
+}
+
+@utility reveal-zoom-in-right {
+  &:not(.is-revealed) {
+    transform: translateX(calc(var(--reveal-distance, 24px) * -1)) scale(0.92);
+  }
+}
+
+@utility reveal-zoom-out {
+  &:not(.is-revealed) {
+    transform: scale(1.08);
+  }
+}
+
+@utility reveal-zoom-out-up {
+  &:not(.is-revealed) {
+    transform: translateY(var(--reveal-distance, 24px)) scale(1.08);
+  }
+}
+
+@utility reveal-zoom-out-down {
+  &:not(.is-revealed) {
+    transform: translateY(calc(var(--reveal-distance, 24px) * -1)) scale(1.08);
+  }
+}
+
+@utility reveal-zoom-out-left {
+  &:not(.is-revealed) {
+    transform: translateX(var(--reveal-distance, 24px)) scale(1.08);
+  }
+}
+
+@utility reveal-zoom-out-right {
+  &:not(.is-revealed) {
+    transform: translateX(calc(var(--reveal-distance, 24px) * -1)) scale(1.08);
+  }
+}
+
+@utility reveal-bloom-in {
+  &:not(.is-revealed) {
+    transform: scale(0.92);
+    filter: blur(var(--reveal-blur, 4px));
+  }
+}
+
+@utility reveal-bloom-in-up {
+  &:not(.is-revealed) {
+    transform: translateY(var(--reveal-distance, 24px)) scale(0.92);
+    filter: blur(var(--reveal-blur, 4px));
+  }
+}
+
+@utility reveal-bloom-in-down {
+  &:not(.is-revealed) {
+    transform: translateY(calc(var(--reveal-distance, 24px) * -1)) scale(0.92);
+    filter: blur(var(--reveal-blur, 4px));
+  }
+}
+
+@utility reveal-bloom-in-left {
+  &:not(.is-revealed) {
+    transform: translateX(var(--reveal-distance, 24px)) scale(0.92);
+    filter: blur(var(--reveal-blur, 4px));
+  }
+}
+
+@utility reveal-bloom-in-right {
+  &:not(.is-revealed) {
+    transform: translateX(calc(var(--reveal-distance, 24px) * -1)) scale(0.92);
+    filter: blur(var(--reveal-blur, 4px));
+  }
+}
+
+/* Timing. Each is declared twice: once for a bare integer, which supplies the
+   unit, and once for an arbitrary value, which brings its own.
+   `data-reveal-delay="162"` does the same job and generates nothing at all -
+   use it when the value is computed at runtime. */
+
+@utility reveal-delay-* {
+  --reveal-delay: calc(--value(integer) * 1ms);
+}
+@utility reveal-delay-* {
+  --reveal-delay: --value([*]);
+}
+
+@utility reveal-duration-* {
+  --reveal-duration: calc(--value(integer) * 1ms);
+}
+@utility reveal-duration-* {
+  --reveal-duration: --value([*]);
+}
+
+@utility reveal-distance-* {
+  --reveal-distance: calc(--value(integer) * 1px);
+}
+@utility reveal-distance-* {
+  --reveal-distance: --value([*]);
+}
+
+@utility reveal-slide-* {
+  --reveal-slide-distance: calc(--value(integer) * 1%);
+}
+@utility reveal-slide-* {
+  --reveal-slide-distance: --value([*]);
+}
+
+@utility reveal-flip-* {
+  --reveal-flip: calc(--value(integer) * 1deg);
+}
+@utility reveal-flip-* {
+  --reveal-flip: --value([*]);
+}
+
+@utility reveal-blur-* {
+  --reveal-blur: calc(--value(integer) * 1px);
+}
+@utility reveal-blur-* {
+  --reveal-blur: --value([*]);
+}
+
+@utility reveal-ease-* {
+  --reveal-easing: --value(--reveal-ease-*);
+}
+@utility reveal-ease-* {
+  --reveal-easing: --value([*]);
+}

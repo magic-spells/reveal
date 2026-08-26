@@ -1,0 +1,6 @@
+# Root .eslintignore
+**/dist/
+**/demo/*.js
+**/node_modules/
+CLAUDE.md
+README.md
