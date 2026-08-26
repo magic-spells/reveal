@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { parseOffset, parseOnce } from "../src/attributes.js";
+import { parseGroup, parseOffset, parseOnce } from "../src/attributes.js";
 
 const attr = (html, name) => {
   document.body.innerHTML = html;
@@ -46,6 +46,86 @@ describe("parseOffset", () => {
         120,
       ),
     ).toEqual({ value: 120, invalid: true });
+  });
+});
+
+describe("parseGroup", () => {
+  it("takes a bare name as a group with no step", () => {
+    expect(parseGroup("box-list-1")).toEqual({
+      name: "box-list-1",
+      step: null,
+    });
+    expect(parseGroup("  spaced  ")).toEqual({ name: "spaced", step: null });
+  });
+
+  it("reads the step in milliseconds", () => {
+    expect(parseGroup("box-list-1:50")).toEqual({
+      name: "box-list-1",
+      step: 50,
+    });
+    expect(parseGroup("row: 120 ")).toEqual({ name: "row", step: 120 });
+  });
+
+  it("is absent when there is nothing to group by", () => {
+    expect(parseGroup(null)).toBe(null);
+    expect(parseGroup(undefined)).toBe(null);
+    expect(parseGroup("")).toBe(null);
+    expect(parseGroup("   ")).toBe(null);
+    // a step with no name names no group
+    expect(parseGroup(":50")).toBe(null);
+    expect(parseGroup(" : 50")).toBe(null);
+    expect(parseGroup(":")).toBe(null);
+    // and neither does a leading colon whose tail is not a step - the name is
+    // what is missing, and nothing after the colon can supply one
+    expect(parseGroup(":abc")).toBe(null);
+    expect(parseGroup(" : abc ")).toBe(null);
+  });
+
+  it("reads a declared zero as a step, not as no step at all", () => {
+    // first-wins only means something if `0` can win
+    expect(parseGroup("row:0")).toEqual({ name: "row", step: 0 });
+    expect(parseGroup("row: 0 ")).toEqual({ name: "row", step: 0 });
+  });
+
+  it("takes a trailing colon as a step left out of the name", () => {
+    // a template rendering an empty step must not move its elements into a
+    // group of their own
+    expect(parseGroup("row:")).toEqual({ name: "row", step: null });
+    expect(parseGroup("row: ")).toEqual({ name: "row", step: null });
+  });
+
+  it("keeps a whole unparseable value as the name", () => {
+    // otherwise `row:abc` would be a different group from `row:abc:50`
+    expect(parseGroup("row:abc")).toEqual({ name: "row:abc", step: null });
+    expect(parseGroup("row:-50")).toEqual({ name: "row:-50", step: null });
+    expect(parseGroup("row:NaN")).toEqual({ name: "row:NaN", step: null });
+    expect(parseGroup("row:Infinity")).toEqual({
+      name: "row:Infinity",
+      step: null,
+    });
+  });
+
+  it("splits on the last colon, so a name may contain earlier ones", () => {
+    expect(parseGroup("cards:hero:75")).toEqual({
+      name: "cards:hero",
+      step: 75,
+    });
+    // and the same name without a step is the same group, not `cards`
+    expect(parseGroup("cards:hero")).toEqual({
+      name: "cards:hero",
+      step: null,
+    });
+  });
+
+  it("reads straight off an element", () => {
+    expect(
+      parseGroup(
+        attr(`<div data-reveal-group="tiles:40"></div>`, "data-reveal-group"),
+      ),
+    ).toEqual({ name: "tiles", step: 40 });
+    expect(
+      parseGroup(attr(`<div data-reveal-group=""></div>`, "data-reveal-group")),
+    ).toBe(null);
   });
 });
 

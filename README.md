@@ -17,6 +17,7 @@ Class-driven scroll reveals on IntersectionObserver. AOS-style effects as plain 
 - 🎛️ **Custom-property timing** - every timing class sets one CSS variable read by a single transition rule
 - 🌬️ **Tailwind entry** - every class as a `@utility`, so a project ships only the effects and timings it writes
 - ⚓ **Anchor groups** - several elements can fire together off one trigger, each with its own delay
+- 🎞️ **Stagger groups** - `data-reveal-group="name:50"` cascades whatever arrives together, so a loop needs no per-index class
 - 🧭 **Nine anchor placements** - element edge to viewport edge, the same nine AOS supports
 - ♿ **Reduced motion, live** - `prefers-reduced-motion: reduce` shows everything immediately, and the page re-arms itself if the setting changes
 - 🔌 **Real teardown** - `destroy()` disconnects everything, for SPA route changes
@@ -121,6 +122,8 @@ The Tailwind build has no scale - any integer generates on demand. On the plain 
 <div class="reveal reveal-fade-up" style="--reveal-delay: {{ forloop.index0 | times: 60 }}ms"></div>
 ```
 
+For a cascade specifically, `data-reveal-group` writes that same property for you and restarts the count on every wave - see [Stagger groups](#stagger-groups).
+
 ## Tailwind
 
 Tailwind projects import a different entry. It is **either/or** — the two builds carry the same effects, and loading both ships each one twice.
@@ -154,7 +157,7 @@ Arbitrary values work throughout — `reveal-delay-[0.4s]`, `reveal-ease-[steps(
 
 A value computed at runtime rides the custom property as an inline style — `style="--reveal-delay: {{ index | times: 60 }}ms"` generates no CSS at all, where a class has to exist at build time.
 
-Behavior — `data-reveal-once`, `data-reveal-anchor`, `data-reveal-offset` — is read by the JavaScript from attributes either way; see below.
+Behavior — `data-reveal-once`, `data-reveal-anchor`, `data-reveal-offset`, `data-reveal-group` — is read by the JavaScript from attributes either way; see below. In a loop where the index is not known at build time, [`data-reveal-group`](#stagger-groups) is the one that hands out the delays for you.
 
 ## Attributes
 
@@ -166,6 +169,7 @@ Classes say what a reveal looks like; data attributes say how the observer treat
 | `data-reveal-once` | `"true"` / `"false"` | Reveal once, or reveal and hide again on every crossing. Overrides the global `once` |
 | `data-reveal-anchor` | CSS selector | Take the trigger geometry from that element instead of this one |
 | `data-reveal-anchor-placement` | placement | Which edge of the trigger has to reach which edge of the viewport |
+| `data-reveal-group` | `name` or `name:step` | Stagger the members revealed together by `step` milliseconds — see [Stagger groups](#stagger-groups) |
 
 ```html
 <div
@@ -223,7 +227,7 @@ Re-queries `.reveal` elements, then refreshes. Call after adding content to the 
 
 ### `destroy()`
 
-Disconnects every observer and listener, and removes the inline custom properties it wrote. Revealed elements keep `is-revealed` - removing it would snap live content back to its resting state - and `reveal-off` goes on `<html>`, because nothing is left running to reveal whatever had not arrived yet. Anything still below its trigger line becomes visible at that moment. `init()` does not go through this path, so re-initializing never flashes the page.
+Disconnects every observer and listener, and removes the inline custom properties it wrote. Revealed elements keep `is-revealed` - removing it would snap live content back to its resting state - and anything still mid-transition is marked `reveal-done` on the way out, so its own transitions are handed straight back rather than left overridden. `reveal-off` goes on `<html>`, because nothing is left running to reveal whatever had not arrived yet. Anything still below its trigger line becomes visible at that moment. `init()` does not go through this path, so re-initializing never flashes the page. It does share the settle debt, though: a plain `init()` re-arm also stamps `reveal-done` on anything mid-transition, which snaps that reveal forward to its finished state - never back to hidden - so a re-arm landing in the middle of a long reveal cuts it short rather than replaying it.
 
 ### `observeCross(elements, options)`
 
@@ -260,6 +264,44 @@ Add `data-reveal-anchor-placement` to say where in the viewport the anchor has t
   data-reveal-anchor-placement="center-center"
 ></div>
 ```
+
+## Stagger groups
+
+A cascade is a delay per element, and in a loop nobody can write one: the index only exists at render time, and a Tailwind class built from it — `reveal-delay-{{ i * 50 }}` — is a string the JIT never sees. `data-reveal-group` moves that arithmetic to the library.
+
+```html
+{% for product in collection.products %}
+  <div class="reveal reveal-fade-up" data-reveal-group="products:60">…</div>
+{% endfor %}
+```
+
+Every member of `products` that reveals in the same crossing gets an inline `--reveal-delay` of `0ms`, `60ms`, `120ms`, … in document order. No class has to exist, and nothing about the group changes what a reveal looks like.
+
+**The step is first-wins.** It comes from the first member in document order that declares one, so a loop can repeat the same value on every iteration without them fighting. A later `products:200` on the same group is ignored, and a group where nobody declares a step — `data-reveal-group="products"` — simply has no opinion about timing, leaving each member's own `reveal-delay-*` class in force.
+
+**Delays are relative to the wave, not to the list.** The counting restarts on every crossing, so a list taller than the viewport cascades once per screenful instead of accumulating a delay nobody would sit through — and an item that arrives on its own arrives immediately. On the way back out under `data-reveal-once="false"` the delay the group wrote is removed, so hiding is never staggered; the next wave hands out fresh delays. Only a delay the group wrote, for an element still in that group, is removed — a group with no step of its own writes nothing and removes nothing, and an element that has left its group keeps whatever `--reveal-delay` it is carrying now.
+
+`refreshHard()` restarts the counting too. Only members actually arriving are counted, so content appended to a list that has already cascaded is a new wave starting from `0ms` rather than an item eleven at `600ms`, and re-querying never rewrites a delay under a transition still in flight.
+
+Compose it with an anchor and the whole group fires on one crossing, in order:
+
+```html
+<section id="pricing">
+  <div class="reveal reveal-fade-up" data-reveal-anchor="#pricing" data-reveal-group="plans:150">Basic</div>
+  <div class="reveal reveal-fade-up" data-reveal-anchor="#pricing" data-reveal-group="plans:150">Pro</div>
+  <div class="reveal reveal-fade-up" data-reveal-anchor="#pricing" data-reveal-group="plans:150">Team</div>
+</section>
+```
+
+Details worth knowing:
+
+- The step is in **milliseconds**, bare — `products:60`, not `products:60ms`.
+- The group writes an inline `--reveal-delay`, which **outranks a `reveal-delay-*` class** on the same element. That is the intended precedence: in a group, the group decides the delay.
+- **`products:0` is a declaration, not an omission.** It says the members arrive together, and it still overrides their delay classes — which is what makes first-wins worth having: a `0` in front wins over a `200` behind it. Declaring nothing at all is `products`, with no colon.
+- `:` separates the name from the step, splitting on the **last** one — so `:` is effectively reserved in a group name. It is read as a separator only when what follows it parses as a step: `cards:hero` is a group *called* `cards:hero`, the same one `cards:hero:75` gives a step to. The exception is a trailing colon, which is a step left out — `products:` is the group `products`.
+- An unusable step — non-numeric, negative — is not fatal: it is simply part of the name, and the group works without a step. One that reads as a number and still cannot be a step (`products:-50`) also logs a warning, since a silently forked group name is hard to see from the outside.
+- A value that leads with the colon names nothing, so it is not a group at all: `":50"` and `":abc"` alike.
+- A group is counted **per wave, not per observer**. The count is keyed by the group name alone and stays open for the rest of the task, so every member arriving in that task continues the same cascade — including members sitting on different trigger lines. A group split across `data-reveal-offset`, `data-reveal-once` or `data-reveal-anchor-placement` settings can therefore hand out `0ms, 50ms, 100ms, 150ms` straight across the two sets, or start each set from `0ms`, depending only on whether the crossings land in one task or two. Keep those three the same across a group you want counted as one.
 
 ## Anchor placements
 
@@ -326,7 +368,7 @@ Resting states are written `:not(.is-revealed)` — when the class lands they st
 | Property | Default | Set by |
 |----------|---------|--------|
 | `--reveal-duration` | `0.6s` | `init({ duration })`, `reveal-duration-*` |
-| `--reveal-delay` | `0s` | `init({ delay })`, `reveal-delay-*` |
+| `--reveal-delay` | `0s` | `init({ delay })`, `reveal-delay-*`, `data-reveal-group` (inline, so it wins) |
 | `--reveal-easing` | `cubic-bezier(0.16, 1, 0.3, 1)` | `init({ easing })`, `reveal-ease-*` |
 | `--reveal-distance` | `24px` | your stylesheet |
 
