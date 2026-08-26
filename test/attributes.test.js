@@ -74,6 +74,11 @@ describe("parseGroup", () => {
     // a step with no name names no group
     expect(parseGroup(":50")).toBe(null);
     expect(parseGroup(" : 50")).toBe(null);
+    expect(parseGroup(":")).toBe(null);
+    // and neither does a leading colon whose tail is not a step - the name is
+    // what is missing, and nothing after the colon can supply one
+    expect(parseGroup(":abc")).toBe(null);
+    expect(parseGroup(" : abc ")).toBe(null);
   });
 
   it("reads a declared zero as a step, not as no step at all", () => {

@@ -45,7 +45,8 @@ export function parseOffset(raw, fallback) {
  * exception - `row:` is a step the author left out of `row`, not a name.
  *
  * Forgiving like the other parsers: an unparseable or negative step is simply
- * part of the name, and a step with no name in front of it is no group.
+ * part of the name, and a value that leads with the colon - naming nothing in
+ * front of it - is no group at all, whatever follows.
  *
  * @param {string|null} raw - Attribute value
  * @returns {{name: string, step: number|null}|null} The group, or null when
@@ -67,12 +68,13 @@ export function parseGroup(raw) {
   // value must not land its elements in a group of their own
   if (rawStep === "") return name === "" ? null : { name, step: null };
 
+  // ":50" and ":abc" name nothing, so there is no group to put anything in -
+  // whether the tail could have been a step or not
+  if (name === "") return null;
+
   const step = Number.parseFloat(rawStep);
   // Not a step, so the colon is part of the name and none of it is a suffix
   if (!Number.isFinite(step) || step < 0) return { name: value, step: null };
-
-  // ":50" names nothing, so there is no group to put anything in
-  if (name === "") return null;
 
   return { name, step };
 }

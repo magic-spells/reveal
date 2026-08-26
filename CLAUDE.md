@@ -157,19 +157,35 @@ leave `bottom-bottom` aimed at a stale height.
 - **`reveal-done` is timed per target, not per trigger.** An anchor says nothing about the
   duration or delay of the elements anchored to it, so reveal runs its own settle per element
   (using the exported `transitionPlan`) before releasing the transition shorthand.
-- **Only a real state change acts.** `#setRevealed()` filters its targets against `#revealed`
-  before doing anything, because a rebuild re-announces every crossing from "not crossed".
-  Acting on those would restart settles, rewrite `--reveal-delay` mid-transition, and let
-  revealed elements claim indices in a wave they are not part of. `#revealed` and `#staggered`
-  are WeakSets that deliberately survive `#teardown()` and `destroy()` - exactly as the classes
-  and inline values they describe do.
+- **Only a real state change acts, and the class is what says so.** `#setRevealed()` filters
+  its targets on `classList.contains(REVEALED_CLASS) !== revealed` before doing anything,
+  because a rebuild re-announces every crossing from "not crossed". Acting on those would
+  restart settles, rewrite `--reveal-delay` mid-transition, and let revealed elements claim
+  indices in a wave they are not part of. The discriminator has to be the class and never a
+  private set: anything can take `is-revealed` off an element - a framework re-rendering the
+  class attribute, an author replaying a reveal - and a controller holding its own opinion
+  would call every later crossing a no-op with nothing, not `refreshHard()` and not
+  `destroy()`/`init()`, able to argue it back. `#reconcile()` reads the same class, for the
+  same reason.
+- **A settle in flight is a debt teardown pays.** `reveal-done` is what releases the transition
+  shorthand, and once `#teardown()` has run there is nothing left to add it - and the re-arm
+  that follows sees no state change, so it starts no new settle either. `#teardown()` therefore
+  calls each pending settle's own `finish` (stored alongside its handler and timer) instead of
+  cancelling it. `#settleTargets()` still *cancels* the settle it is replacing; only teardown
+  completes. That makes `#teardown()` a method that writes a class, so it clears `#initialized`
+  **first** - a consumer reacting synchronously must not be able to rebuild into a teardown
+  still running.
 - **A stagger wave is a task, and a rebuild ends it.** `#stagger()` numbers the members
   arriving together, and `#openWave()` holds the batch open on a `setTimeout(0)` - a microtask
   would close it between two observer callbacks describing one crossing. `#rebuild()` calls
-  `#endWave()` so appended content starts a fresh cascade at `0ms`. The controller removes an
-  inline delay on the way out only when `#staggered` says it wrote one, so a step-less group
-  never eats an author's own `--reveal-delay`. A declared step of `0` is a real step
-  (`step === undefined` is the absent check, never `!step`).
+  `#endWave()` so appended content starts a fresh cascade at `0ms`. A declared step of `0` is a
+  real step (`step === undefined` is the absent check, never `!step`).
+- **The controller only removes a delay it still owns.** `#staggered` is a WeakSet of the
+  elements whose inline `--reveal-delay` it wrote; it survives `#teardown()` and `destroy()`
+  exactly as that value does. Removal on the way out needs **both** that record and current
+  group membership (`#groupNames.has(element)`), because an element can leave its group while
+  revealed and be given a delay of its own before it ever exits - wiping that would eat an
+  author's value. A step-less group writes nothing and so removes nothing.
 
 ## Verifying
 

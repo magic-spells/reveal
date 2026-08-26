@@ -178,6 +178,81 @@ describe("reveal against a stubbed IntersectionObserver", () => {
     expect(done(card)).toBe(false);
   });
 
+  it("re-reveals an element whose state class was stripped from outside", () => {
+    document.body.innerHTML = `<div id="card" class="reveal reveal-fade-up"></div>`;
+    const card = document.getElementById("card");
+    place(card, { top: 200 });
+
+    Reveal.init({ offset: 120 });
+    expect(revealed(card)).toBe(true);
+    expect(done(card)).toBe(true);
+
+    // A framework patching the class attribute - or an author replaying the
+    // reveal - takes the state class off. The class is the only record there
+    // is, so the next crossing puts it straight back; a private one would call
+    // this a no-op and leave the card hidden with nothing able to argue.
+    card.classList.remove("is-revealed", "reveal-done");
+    Reveal.refreshHard();
+
+    expect(revealed(card)).toBe(true);
+    expect(done(card)).toBe(true);
+  });
+
+  it("finishes a settle that a re-init interrupts mid-transition", () => {
+    document.body.innerHTML = `
+      <div id="card" class="reveal reveal-fade-up"
+           style="transition-property: opacity; transition-duration: 600ms"></div>`;
+    const card = document.getElementById("card");
+    place(card, { top: 200 });
+
+    Reveal.init({ offset: 120 });
+    expect(revealed(card)).toBe(true);
+    // the transition is still running, so `reveal-done` is owed, not given
+    expect(done(card)).toBe(false);
+
+    // A re-init lands mid-transition - the reduced-motion listener's, or a
+    // consumer's. Its fresh observers re-announce a crossing that is not a
+    // state change, so nothing after this point will ever settle the card:
+    // teardown has to pay what it owes on the way out, or the library's
+    // transition shorthand overrides the card's own for the life of the page.
+    Reveal.init({ offset: 120 });
+
+    expect(done(card)).toBe(true);
+  });
+
+  it("leaves a settle already in flight running when a rebuild re-announces it", () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = `
+      <div id="band"></div>
+      <div id="a" class="reveal reveal-fade-up" data-reveal-anchor="#band"
+           style="transition-property: opacity; transition-duration: 600ms"></div>
+      <div id="b" class="reveal reveal-fade-up" data-reveal-anchor="#band"
+           style="transition-property: opacity; transition-duration: 600ms"></div>`;
+    const band = document.getElementById("band");
+    const a = document.getElementById("a");
+    const b = document.getElementById("b");
+    [band, a, b].forEach((element) => place(element, { top: 200 }));
+
+    Reveal.init({ offset: 120 });
+    expect([revealed(a), revealed(b)]).toEqual([true, true]);
+    expect([done(a), done(b)]).toEqual([false, false]);
+
+    vi.advanceTimersByTime(400);
+
+    // Only `a` loses its class, so only `a` is a state change when the rebuild
+    // re-announces the anchor's one crossing. `b` is two thirds of the way
+    // through a transition nobody restarted.
+    a.classList.remove("is-revealed", "reveal-done");
+    Reveal.refreshHard();
+
+    vi.advanceTimersByTime(300);
+    const settled = done(b);
+    vi.useRealTimers();
+
+    // restarting b's settle would hold `reveal-done` back another full 600ms
+    expect(settled).toBe(true);
+  });
+
   it("waits for a boxless element to gain a layout box", () => {
     document.body.innerHTML = `<div id="hidden" class="reveal reveal-fade-up"></div>`;
     const hidden = document.getElementById("hidden");
@@ -671,6 +746,54 @@ describe("stagger groups", () => {
 
     expect(revealed(a)).toBe(false);
     expect(delay(a)).toBe("300ms");
+  });
+
+  it("leaves an inline delay alone once the element has left its group", () => {
+    document.body.innerHTML = `
+      <div id="a" class="reveal reveal-fade-up" data-reveal-group="row:50"
+           data-reveal-once="false"></div>`;
+    const a = document.getElementById("a");
+    place(a, { top: 200 });
+
+    Reveal.init({ offset: 120 });
+    expect(delay(a)).toBe("0ms");
+
+    // A re-render takes the element out of the group and gives it a delay of
+    // its own. The controller's claim on the property was the group's, and it
+    // went with the group - the value here is the author's now.
+    a.removeAttribute("data-reveal-group");
+    a.style.setProperty("--reveal-delay", "300ms");
+    Reveal.refreshHard();
+
+    place(a, { top: 5000 });
+    FakeObserver.watching(a).forEach((observer) => observer.fire([a], false));
+
+    expect(revealed(a)).toBe(false);
+    expect(delay(a)).toBe("300ms");
+  });
+
+  it("warns when a colon suffix reads like a step but cannot be one", () => {
+    const [a, b, c] = row(() => `data-reveal-group="row:-50"`);
+
+    Reveal.init({ offset: 120 });
+
+    // the whole value is the group name, which is invisible from the outside
+    expect(console.warn).toHaveBeenCalledWith(
+      expect.stringContaining("data-reveal-group"),
+      a,
+    );
+    // and it is still a group, just one with nothing to say about timing
+    expect([a, b, c].every(revealed)).toBe(true);
+    expect([delay(a), delay(b), delay(c)]).toEqual(["", "", ""]);
+  });
+
+  it("says nothing about a name that merely contains a colon", () => {
+    const [a, b, c] = row(() => `data-reveal-group="cards:hero"`);
+
+    Reveal.init({ offset: 120 });
+
+    expect(console.warn).not.toHaveBeenCalled();
+    expect([a, b, c].every(revealed)).toBe(true);
   });
 });
 

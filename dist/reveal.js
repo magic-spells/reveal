@@ -985,7 +985,8 @@
    * exception - `row:` is a step the author left out of `row`, not a name.
    *
    * Forgiving like the other parsers: an unparseable or negative step is simply
-   * part of the name, and a step with no name in front of it is no group.
+   * part of the name, and a value that leads with the colon - naming nothing in
+   * front of it - is no group at all, whatever follows.
    *
    * @param {string|null} raw - Attribute value
    * @returns {{name: string, step: number|null}|null} The group, or null when
@@ -1007,12 +1008,13 @@
     // value must not land its elements in a group of their own
     if (rawStep === "") return name === "" ? null : { name, step: null };
 
+    // ":50" and ":abc" name nothing, so there is no group to put anything in -
+    // whether the tail could have been a step or not
+    if (name === "") return null;
+
     const step = Number.parseFloat(rawStep);
     // Not a step, so the colon is part of the name and none of it is a suffix
     if (!Number.isFinite(step) || step < 0) return { name: value, step: null };
-
-    // ":50" names nothing, so there is no group to put anything in
-    if (name === "") return null;
 
     return { name, step };
   }
@@ -1096,11 +1098,10 @@
     #settles = new Map();
     #groupNames = new Map();
     #groupSteps = new Map();
-    // What the controller believes it has revealed, and whose inline delay it
-    // wrote. Both outlive a rebuild - and a destroy() - exactly as the classes
-    // and the inline values they describe do, so a fresh observer re-announcing
-    // an old reveal is recognisable as the no-op it is.
-    #revealed = new WeakSet();
+    // Whose inline delay the controller wrote. It outlives a rebuild - and a
+    // destroy() - exactly as the value it describes does, so the controller only
+    // ever removes a delay it put there itself. Whether an element is *revealed*
+    // is not tracked here: that lives in the class, where anything can see it.
     #staggered = new WeakSet();
     #wave = new Map();
     #waveTimer = null;
@@ -1198,12 +1199,21 @@
      * visible on its way to re-arming - so it uses this instead of destroy().
      */
     #teardown() {
+      // First, because finishing the settles below writes a class, and a
+      // consumer reacting to that synchronously must not be able to rebuild into
+      // the teardown that is still running - refresh() and refreshHard() both
+      // check this flag
+      this.#initialized = false;
+
       this.#teardownObservers();
       this.#groups = [];
 
-      this.#settles.forEach((settle, element) =>
-        this.#cancelSettle(element, settle),
-      );
+      // A settle in flight is a debt: `reveal-done` is what hands the element's
+      // own transitions back, and nothing is left running to pay it afterwards.
+      // Dropping it would leave the library's transition shorthand overriding
+      // them for the life of the page - so teardown finishes what it started
+      // rather than abandoning it.
+      this.#settles.forEach((settle) => settle.finish());
       this.#settles.clear();
 
       // Inline delays are left where they are, the way `is-revealed` is: they
@@ -1219,7 +1229,6 @@
       }
 
       this.#unwatchReducedMotion();
-      this.#initialized = false;
       this.#disabled = false;
       this.#rebuilding = false;
       this.#rebuildDirty = false;
@@ -1457,14 +1466,42 @@
      * order the members appear in is exactly what can change.
      */
     #registerGroup(element) {
-      const group = parseGroup(element.getAttribute("data-reveal-group"));
+      const raw = element.getAttribute("data-reveal-group");
+      const group = parseGroup(raw);
       if (!group) return;
 
+      this.#warnOnRejectedStep(raw, group, element);
       this.#groupNames.set(element, group.name);
 
       if (group.step !== null && !this.#groupSteps.has(group.name)) {
         this.#groupSteps.set(group.name, group.step);
       }
+    }
+
+    /**
+     * Say so when a step was meant and not read
+     *
+     * A tail the parser will not take as a step stays part of the name, which is
+     * the right answer for `cards:hero` and a silent fork of the group for
+     * `cards:-50`. Nothing about the result shows the difference, so a tail that
+     * reads as a number and still failed is worth a word - the same courtesy
+     * `#readOffset` extends to an unusable offset.
+     */
+    #warnOnRejectedStep(raw, group, element) {
+      if (group.step !== null || group.name !== String(raw).trim()) return;
+
+      const split = group.name.lastIndexOf(":");
+      // No colon is no attempt at a step - `data-reveal-group="50"` is a group
+      // whose name happens to be a number
+      if (split === -1) return;
+
+      const tail = group.name.slice(split + 1);
+      if (tail === "" || Number.isNaN(Number.parseFloat(tail))) return;
+
+      console.warn(
+        `Reveal: unusable step in data-reveal-group "${raw}", grouping by the whole value`,
+        element,
+      );
     }
 
     /**
@@ -1566,7 +1603,11 @@
 
       group.byTrigger.forEach((targets, trigger) => {
         if (group.observer.crossed(trigger)) return;
-        if (!targets.some((element) => this.#revealed.has(element))) return;
+        if (
+          !targets.some((element) => element.classList.contains(REVEALED_CLASS))
+        ) {
+          return;
+        }
         this.#setRevealed(group, trigger, false);
       });
     }
@@ -1579,13 +1620,19 @@
      * so an already-revealed element is re-announced routinely - and acting on
      * that would restart its settle, rewrite `--reveal-delay` under a transition
      * already in flight, and let it claim a place in a wave it is not part of.
+     *
+     * The class itself is the record, never a private set. Anything can take
+     * `is-revealed` off an element - a framework re-rendering the class
+     * attribute, an author replaying a reveal - and a controller holding its own
+     * opinion would call every later crossing a no-op and strand the element
+     * hidden, with nothing able to argue it back.
      */
     #setRevealed(group, trigger, revealed) {
       const targets = group.byTrigger.get(trigger);
       if (!targets) return;
 
       const changed = targets.filter(
-        (element) => this.#revealed.has(element) !== revealed,
+        (element) => element.classList.contains(REVEALED_CLASS) !== revealed,
       );
       if (changed.length === 0) return;
 
@@ -1594,22 +1641,17 @@
       if (revealed) this.#stagger(changed);
 
       changed.forEach((element) => {
-        if (revealed) {
-          this.#revealed.add(element);
-        } else {
-          this.#revealed.delete(element);
-        }
-
         element.classList.toggle(REVEALED_CLASS, revealed);
         if (revealed) return;
 
         // The reveal transition has to be in force again on the way out
         element.classList.remove(DONE_CLASS);
         // Hiding is not staggered - the next wave hands out its own delays. Only
-        // a value this controller wrote is dropped: a step-less group leaves the
-        // author's own inline `--reveal-delay` alone, on the way out as on the
-        // way in.
-        if (this.#staggered.delete(element)) {
+        // a value this controller wrote, for a group the element is still in, is
+        // dropped: a step-less group leaves the author's own inline
+        // `--reveal-delay` alone, and so does an element that has since left its
+        // group and been given a delay of its own.
+        if (this.#groupNames.has(element) && this.#staggered.delete(element)) {
           element.style.removeProperty(DELAY_PROPERTY);
         }
       });
@@ -1623,6 +1665,9 @@
      * Timed per target rather than per trigger: an anchor says nothing about the
      * duration or delay of the elements anchored to it, and cutting a 1.8s
      * reveal short would strand it mid-transform.
+     *
+     * Each pending settle carries its own `finish`, so a teardown can complete
+     * what it interrupts rather than dropping it.
      */
     #settleTargets(targets, revealed) {
       targets.forEach((element) => {
@@ -1651,6 +1696,7 @@
         element.addEventListener("transitioncancel", handler);
         this.#settles.set(element, {
           handler,
+          finish,
           timer: setTimeout(finish, plan.total + SETTLE_SLACK),
         });
       });
