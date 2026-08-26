@@ -156,7 +156,7 @@ leave `bottom-bottom` aimed at a stale height.
   equality means no exit callback and teardown deliberately keeps classes.
 - **`reveal-done` is timed per target, not per trigger.** An anchor says nothing about the
   duration or delay of the elements anchored to it, so reveal runs its own settle per element
-  (using the exported `transitionPlan`) before releasing the transition shorthand.
+  (through `whenSettled`) before releasing the transition shorthand.
 - **Only a real state change acts, and the class is what says so.** `#setRevealed()` filters
   its targets on `classList.contains(REVEALED_CLASS) !== revealed` before doing anything,
   because a rebuild re-announces every crossing from "not crossed". Acting on those would
@@ -170,9 +170,10 @@ leave `bottom-bottom` aimed at a stale height.
 - **A settle in flight is a debt teardown pays.** `reveal-done` is what releases the transition
   shorthand, and once `#teardown()` has run there is nothing left to add it - and the re-arm
   that follows sees no state change, so it starts no new settle either. `#teardown()` therefore
-  calls each pending settle's own `finish` (stored alongside its handler and timer) instead of
-  cancelling it. `#settleTargets()` still *cancels* the settle it is replacing; only teardown
-  completes. That makes `#teardown()` a method that writes a class, so it clears `#initialized`
+  calls each pending settle's own `finish` (stored in the record alongside the `cancel` closure
+  `whenSettled` hands back) instead of cancelling it - `finish` cancels its own wait on the way
+  through, so there is nothing left to cancel afterwards. `#settleTargets()` still *cancels* the
+  settle it is replacing; only teardown completes. That makes `#teardown()` a method that writes a class, so it clears `#initialized`
   **first** - a consumer reacting synchronously must not be able to rebuild into a teardown
   still running.
 - **A stagger wave is a task, and a rebuild ends it.** `#stagger()` numbers the members
@@ -180,12 +181,14 @@ leave `bottom-bottom` aimed at a stale height.
   would close it between two observer callbacks describing one crossing. `#rebuild()` calls
   `#endWave()` so appended content starts a fresh cascade at `0ms`. A declared step of `0` is a
   real step (`step === undefined` is the absent check, never `!step`).
-- **The controller only removes a delay it still owns.** `#staggered` is a WeakSet of the
-  elements whose inline `--reveal-delay` it wrote; it survives `#teardown()` and `destroy()`
-  exactly as that value does. Removal on the way out needs **both** that record and current
-  group membership (`#groupNames.has(element)`), because an element can leave its group while
-  revealed and be given a delay of its own before it ever exits - wiping that would eat an
-  author's value. A step-less group writes nothing and so removes nothing.
+- **The controller only removes a delay it still owns.** `#staggered` is a WeakMap from an
+  element to the **name of the group** that wrote its inline `--reveal-delay`; it survives
+  `#teardown()` and `destroy()` exactly as that value does. Removal on the way out needs the
+  recorded name to equal the element's *current* group name, not merely membership in some
+  group: an element can leave the group that wrote the value - for no group at all, or for a
+  different one - and be given a delay of its own before it ever exits, and wiping that would
+  eat an author's value. A step-less group writes nothing and so removes nothing, which is
+  exactly the group a swap most often lands in.
 
 ## Verifying
 

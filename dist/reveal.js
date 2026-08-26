@@ -1140,11 +1140,13 @@
     #settles = new Map();
     #groupNames = new Map();
     #groupSteps = new Map();
-    // Whose inline delay the controller wrote. It outlives a rebuild - and a
-    // destroy() - exactly as the value it describes does, so the controller only
-    // ever removes a delay it put there itself. Whether an element is *revealed*
-    // is not tracked here: that lives in the class, where anything can see it.
-    #staggered = new WeakSet();
+    // Whose inline delay the controller wrote, and *which group* wrote it. It
+    // outlives a rebuild - and a destroy() - exactly as the value it describes
+    // does, so the controller only ever removes a delay it put there itself, and
+    // only while the element is still in the group that put it there. Whether an
+    // element is *revealed* is not tracked here: that lives in the class, where
+    // anything can see it.
+    #staggered = new WeakMap();
     #wave = new Map();
     #waveTimer = null;
     #initialized = false;
@@ -1586,7 +1588,7 @@
         }
 
         element.style.setProperty(DELAY_PROPERTY, `${index * step}ms`);
-        this.#staggered.add(element);
+        this.#staggered.set(element, name);
         this.#openWave();
       });
     }
@@ -1690,11 +1692,14 @@
         // The reveal transition has to be in force again on the way out
         element.classList.remove(DONE_CLASS);
         // Hiding is not staggered - the next wave hands out its own delays. Only
-        // a value this controller wrote, for a group the element is still in, is
-        // dropped: a step-less group leaves the author's own inline
-        // `--reveal-delay` alone, and so does an element that has since left its
-        // group and been given a delay of its own.
-        if (this.#groupNames.has(element) && this.#staggered.delete(element)) {
+        // a value this controller wrote, for the group that is still the
+        // element's own, is dropped: a step-less group leaves the author's inline
+        // `--reveal-delay` alone, and so does an element that has since left the
+        // group that wrote the value - whether for no group at all or for a
+        // different one - and been given a delay of its own.
+        const owner = this.#staggered.get(element);
+        if (owner !== undefined && this.#groupNames.get(element) === owner) {
+          this.#staggered.delete(element);
           element.style.removeProperty(DELAY_PROPERTY);
         }
       });

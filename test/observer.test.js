@@ -957,6 +957,32 @@ describe("stagger groups", () => {
     expect(delay(a)).toBe("300ms");
   });
 
+  it("leaves an inline delay alone once the element has swapped groups", () => {
+    // The same claim, given up the same way - but to another group rather than
+    // to no group. Membership on its own says nothing: the record has to name
+    // the group that actually wrote the value.
+    document.body.innerHTML = `
+      <div id="a" class="reveal reveal-fade-up" data-reveal-group="row:50"
+           data-reveal-once="false"></div>`;
+    const a = document.getElementById("a");
+    place(a, { top: 200 });
+
+    Reveal.init({ offset: 120 });
+    expect(delay(a)).toBe("0ms");
+
+    // a re-render moves it into a *step-less* group, which writes no delay of
+    // its own, and hands it an author's value
+    a.setAttribute("data-reveal-group", "other");
+    a.style.setProperty("--reveal-delay", "300ms");
+    Reveal.refreshHard();
+
+    place(a, { top: 5000 });
+    FakeObserver.watching(a).forEach((observer) => observer.fire([a], false));
+
+    expect(revealed(a)).toBe(false);
+    expect(delay(a)).toBe("300ms");
+  });
+
   it("warns when a colon suffix reads like a step but cannot be one", () => {
     const [a, b, c] = row(() => `data-reveal-group="row:-50"`);
 

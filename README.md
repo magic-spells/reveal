@@ -227,7 +227,7 @@ Re-queries `.reveal` elements, then refreshes. Call after adding content to the 
 
 ### `destroy()`
 
-Disconnects every observer and listener, and removes the inline custom properties it wrote. Revealed elements keep `is-revealed` - removing it would snap live content back to its resting state - and anything still mid-transition is marked `reveal-done` on the way out, so its own transitions are handed straight back rather than left overridden. `reveal-off` goes on `<html>`, because nothing is left running to reveal whatever had not arrived yet. Anything still below its trigger line becomes visible at that moment. `init()` does not go through this path, so re-initializing never flashes the page.
+Disconnects every observer and listener, and removes the inline custom properties it wrote. Revealed elements keep `is-revealed` - removing it would snap live content back to its resting state - and anything still mid-transition is marked `reveal-done` on the way out, so its own transitions are handed straight back rather than left overridden. `reveal-off` goes on `<html>`, because nothing is left running to reveal whatever had not arrived yet. Anything still below its trigger line becomes visible at that moment. `init()` does not go through this path, so re-initializing never flashes the page. It does share the settle debt, though: a plain `init()` re-arm also stamps `reveal-done` on anything mid-transition, which snaps that reveal forward to its finished state - never back to hidden - so a re-arm landing in the middle of a long reveal cuts it short rather than replaying it.
 
 ### `observeCross(elements, options)`
 
