@@ -98,7 +98,7 @@ const PREARM_BAND = 400;
 const TRIGGER_EPSILON = 2;
 
 /** Grace period added to a transition's own timing before giving up on it (ms) */
-const SETTLE_SLACK$1 = 80;
+const SETTLE_SLACK = 80;
 
 /** Delay before rebuilding observers after a viewport or layout change (ms) */
 const RESIZE_DEBOUNCE = 100;
@@ -152,6 +152,9 @@ function documentTop(element) {
   let top = 0;
   let node = element;
 
+  // The typeof guard is load-bearing, not a paranoid null check: Firefox's
+  // SVGElement has no offsetTop/offsetParent at all, so this is what ends the
+  // walk on an SVG node and hands it the "no offsetParent chain" path.
   while (node && typeof node.offsetTop === "number") {
     top += node.offsetTop - (node.tagName !== "BODY" ? node.scrollTop : 0);
     node = node.offsetParent;
@@ -207,6 +210,50 @@ function parseTimes(value) {
       if (Number.isNaN(number)) return 0;
       return text.endsWith("ms") ? number : number * 1000;
     });
+}
+
+/**
+ * Run a callback once the transition an element just started has finished
+ *
+ * Both halves of the library wait out the same transition for their own
+ * reasons - reveal to release its `transition` shorthand, the observer to
+ * re-measure a box that only means anything at rest - so the listening is
+ * shared and only the completion differs.
+ *
+ * The returned closure owns every resource the wait allocated, which is what
+ * keeps a listener from outliving its cycle and ending the *next* transition
+ * early.
+ *
+ * @param {Element} element - Element whose transition to wait out
+ * @param {Function} done - Called once, when it ends, is cancelled, or overruns
+ * @returns {Function|null} Cancel the wait, or null when there was nothing to
+ * wait for and `done` has already run
+ */
+function whenSettled(element, done) {
+  const plan = transitionPlan(element);
+
+  if (plan.total <= 0) {
+    done();
+    return null;
+  }
+
+  const handler = (event) => {
+    // A transition on a descendant bubbles through here, and a shorter
+    // property finishing says nothing about the one that finishes last
+    if (event.target !== element) return;
+    if (plan.property !== "all" && event.propertyName !== plan.property) return;
+    done();
+  };
+
+  element.addEventListener("transitionend", handler);
+  element.addEventListener("transitioncancel", handler);
+  const timer = setTimeout(done, plan.total + SETTLE_SLACK);
+
+  return () => {
+    clearTimeout(timer);
+    element.removeEventListener("transitionend", handler);
+    element.removeEventListener("transitioncancel", handler);
+  };
 }
 
 /**
@@ -301,13 +348,15 @@ class CrossObserver {
   constructor(elements, options) {
     this.#config = { ...this.#config, ...options };
 
-    if (!resolvePlacement(this.#config.placement)) {
+    let factors = resolvePlacement(this.#config.placement);
+    if (!factors) {
       console.warn(
         `observeCross: unknown placement "${this.#config.placement}", falling back to "${DEFAULT_PLACEMENT$1}"`,
       );
       this.#config.placement = DEFAULT_PLACEMENT$1;
+      factors = resolvePlacement(DEFAULT_PLACEMENT$1);
     }
-    this.#factors = resolvePlacement(this.#config.placement);
+    this.#factors = factors;
 
     resolveElements(elements).forEach((element) => {
       if (!(element instanceof Element)) return;
@@ -315,15 +364,16 @@ class CrossObserver {
         crossed: false,
         armed: false,
         done: false,
-        painted: false,
+        // null until the first evaluation decides; the answer cannot change
+        // for the life of these observers
+        painted: null,
         margin: null,
         height: 0,
         shift: 0,
         restingShift: 0,
         crossedShift: null,
         settling: false,
-        settleTimer: null,
-        settleHandler: null,
+        cancelSettle: null,
       });
     });
 
@@ -424,6 +474,8 @@ class CrossObserver {
    */
   #measureBox(element, state) {
     const rect = element.getBoundingClientRect();
+    // Load-bearing, like the one in documentTop(): Firefox's SVGElement has no
+    // offsetHeight/offsetWidth, and these fall back to the painted box for it
     const layoutHeight =
       typeof element.offsetHeight === "number" ? element.offsetHeight : null;
     const layoutWidth =
@@ -471,10 +523,6 @@ class CrossObserver {
     state.height = box.height;
     state.restingShift = box.shift;
     state.shift = state.crossed ? (state.crossedShift ?? box.shift) : box.shift;
-
-    if (this.#prearmObserver) {
-      this.#prearmObserver.unobserve(element);
-    }
 
     // An element-edge placement is measured from this element's own height, so
     // its own resizes have to re-aim it - a document-level observer never sees
@@ -534,7 +582,11 @@ class CrossObserver {
 
     // Decided before the first measurement: which geometry an element inside a
     // scrolling container gets is not a detail the measurement can discover.
-    if (!state.armed) state.painted = hasScrollableAncestor(element);
+    // Once, not once per refresh - the walk costs a computed style per ancestor,
+    // and a refresh cannot move an element. A rebuild starts from fresh state.
+    if (state.painted === null) {
+      state.painted = hasScrollableAncestor(element);
+    }
 
     const box = this.#measureBox(element, state);
     if (!box) return;
@@ -603,7 +655,6 @@ class CrossObserver {
   #settle(element, state) {
     this.#cancelSettle(state);
 
-    const plan = transitionPlan(element);
     state.settling = true;
 
     const finish = () => {
@@ -625,36 +676,14 @@ class CrossObserver {
       if (state.done) this.#states.delete(element);
     };
 
-    if (plan.total <= 0) {
-      finish();
-      return;
-    }
-
-    state.settleHandler = (event) => {
-      if (event.target !== element) return;
-      if (plan.property !== "all" && event.propertyName !== plan.property)
-        return;
-      finish();
-    };
-
-    element.addEventListener("transitionend", state.settleHandler);
-    element.addEventListener("transitioncancel", state.settleHandler);
-    state.settleTimer = setTimeout(finish, plan.total + SETTLE_SLACK$1);
+    state.cancelSettle = whenSettled(element, finish);
   }
 
-  #cancelSettle(state, element) {
-    if (state.settleTimer) {
-      clearTimeout(state.settleTimer);
-      state.settleTimer = null;
-    }
-    if (state.settleHandler) {
-      const node = element || state.node;
-      if (node) {
-        node.removeEventListener("transitionend", state.settleHandler);
-        node.removeEventListener("transitioncancel", state.settleHandler);
-      }
-      state.settleHandler = null;
-    }
+  #cancelSettle(state) {
+    const cancel = state.cancelSettle;
+    if (!cancel) return;
+    state.cancelSettle = null;
+    cancel();
   }
 
   /**
@@ -698,6 +727,8 @@ class CrossObserver {
   #retire(element, state) {
     this.#unobserve(element, state);
     if (this.#resizeObserver) this.#resizeObserver.unobserve(element);
+    // Nothing is watching it any more, so the primed set would just hold it
+    this.#primed.delete(element);
     state.done = true;
   }
 
@@ -822,9 +853,7 @@ class CrossObserver {
 
     this.#teardownObservers();
 
-    this.#states.forEach((state, element) =>
-      this.#cancelSettle(state, element),
-    );
+    this.#states.forEach((state) => this.#cancelSettle(state));
 
     if (this.#resizeObserver) {
       this.#resizeObserver.disconnect();
@@ -1015,9 +1044,6 @@ const SELECTOR = ".reveal";
 const DEFAULT_PLACEMENT = "top-bottom";
 const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
 
-/** Grace period added to a transition's own timing before giving up on it (ms) */
-const SETTLE_SLACK = 80;
-
 /** The one property a stagger group writes, as an inline style, per member */
 const DELAY_PROPERTY = "--reveal-delay";
 
@@ -1150,9 +1176,7 @@ class RevealController {
     this.#teardownObservers();
     this.#groups = [];
 
-    this.#settles.forEach((settle, element) =>
-      this.#cancelSettle(element, settle),
-    );
+    this.#settles.forEach((cancel) => cancel());
     this.#settles.clear();
 
     // Inline delays are left where they are, the way `is-revealed` is: they
@@ -1546,42 +1570,25 @@ class RevealController {
    */
   #settleTargets(targets, revealed) {
     targets.forEach((element) => {
-      this.#cancelSettle(element, this.#settles.get(element));
+      this.#cancelSettle(element);
 
       const finish = () => {
-        this.#cancelSettle(element, this.#settles.get(element));
+        this.#cancelSettle(element);
         element.classList.toggle(DONE_CLASS, revealed);
       };
 
-      const plan = transitionPlan(element);
-      if (plan.total <= 0) {
-        finish();
-        return;
-      }
-
-      const handler = (event) => {
-        if (event.target !== element) return;
-        if (plan.property !== "all" && event.propertyName !== plan.property) {
-          return;
-        }
-        finish();
-      };
-
-      element.addEventListener("transitionend", handler);
-      element.addEventListener("transitioncancel", handler);
-      this.#settles.set(element, {
-        handler,
-        timer: setTimeout(finish, plan.total + SETTLE_SLACK),
-      });
+      // null means there was no transition to wait for and finish already ran,
+      // so there is nothing left to cancel
+      const cancel = whenSettled(element, finish);
+      if (cancel) this.#settles.set(element, cancel);
     });
   }
 
-  #cancelSettle(element, settle) {
-    if (!settle) return;
-    clearTimeout(settle.timer);
-    element.removeEventListener("transitionend", settle.handler);
-    element.removeEventListener("transitioncancel", settle.handler);
+  #cancelSettle(element) {
+    const cancel = this.#settles.get(element);
+    if (!cancel) return;
     this.#settles.delete(element);
+    cancel();
   }
 
   #teardownObservers() {

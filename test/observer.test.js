@@ -362,6 +362,75 @@ describe("reveal against a stubbed IntersectionObserver", () => {
 
     expect(revealed(inner)).toBe(true);
   });
+
+  it("takes its settle listeners back off when the transition ends", () => {
+    document.body.innerHTML = `<i id="card"></i>`;
+    const card = document.getElementById("card");
+    place(card, { top: 5000 });
+
+    // jsdom computes no transition at all, so a settle would finish in the
+    // same tick and never listen for anything
+    vi.spyOn(globalThis, "getComputedStyle").mockImplementation(() => ({
+      overflow: "visible",
+      overflowX: "visible",
+      overflowY: "visible",
+      transitionProperty: "transform",
+      transitionDuration: "300ms",
+      transitionDelay: "0ms",
+    }));
+
+    const added = vi.spyOn(card, "addEventListener");
+    const removed = vi.spyOn(card, "removeEventListener");
+    const transitionCalls = (spy) =>
+      spy.mock.calls.filter(([type]) => type.startsWith("transition")).length;
+
+    const handle = observeCross([card], { offset: 0, once: false });
+
+    place(card, { top: 100 });
+    FakeObserver.watching(card)[0].fire([card]);
+
+    // the crossing started a transition, and the settle is waiting it out
+    expect(transitionCalls(added)).toBe(2);
+    expect(transitionCalls(removed)).toBe(0);
+
+    const event = new Event("transitionend");
+    Object.defineProperty(event, "propertyName", { value: "transform" });
+    card.dispatchEvent(event);
+
+    // every listener the wait put on comes back off with it: a stale one would
+    // still be live during the next crossing's transition, and that one ends on
+    // a different property - so it would cut the settle short and record a
+    // shift measured mid-flight
+    expect(handle.crossed(card)).toBe(true);
+    expect(transitionCalls(removed)).toBe(2);
+
+    card.dispatchEvent(event);
+    expect(transitionCalls(removed)).toBe(2);
+
+    handle.destroy();
+  });
+
+  it("works out a scrolling ancestor once, not again on every refresh", () => {
+    document.body.innerHTML = `
+      <div id="wrap"><div id="card" class="reveal reveal-fade-up"></div></div>`;
+    const wrap = document.getElementById("wrap");
+    // below its line, so it stays tracked rather than retiring on the spot
+    place(document.getElementById("card"), { top: 5000 });
+
+    const styles = vi.spyOn(globalThis, "getComputedStyle");
+    const walks = () =>
+      styles.mock.calls.filter(([node]) => node === wrap).length;
+
+    Reveal.init({ offset: 120 });
+    expect(walks()).toBe(1);
+
+    // The walk costs a computed style per ancestor and a refresh can run per
+    // frame under syncOnScroll, so the answer is kept - it cannot change while
+    // these observers live, and a rebuild starts from fresh state anyway.
+    Reveal.refresh();
+    Reveal.refresh();
+    expect(walks()).toBe(1);
+  });
 });
 
 const delay = (element) => element.style.getPropertyValue("--reveal-delay");
