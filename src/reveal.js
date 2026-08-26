@@ -1,5 +1,5 @@
 import "./reveal.css";
-import { observeCross, transitionPlan } from "./observe-cross.js";
+import { observeCross, whenSettled } from "./observe-cross.js";
 import { parseGroup, parseOffset, parseOnce } from "./attributes.js";
 
 /**
@@ -33,9 +33,6 @@ const DONE_CLASS = "reveal-done";
 const SELECTOR = ".reveal";
 const DEFAULT_PLACEMENT = "top-bottom";
 const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
-
-/** Grace period added to a transition's own timing before giving up on it (ms) */
-const SETTLE_SLACK = 80;
 
 /** The one property a stagger group writes, as an inline style, per member */
 const DELAY_PROPERTY = "--reveal-delay";
@@ -184,7 +181,8 @@ class RevealController {
     // own transitions back, and nothing is left running to pay it afterwards.
     // Dropping it would leave the library's transition shorthand overriding
     // them for the life of the page - so teardown finishes what it started
-    // rather than abandoning it.
+    // rather than abandoning it. `finish` cancels its own wait on the way
+    // through, so the settles do not need cancelling as well.
     this.#settles.forEach((settle) => settle.finish());
     this.#settles.clear();
 
@@ -643,43 +641,26 @@ class RevealController {
    */
   #settleTargets(targets, revealed) {
     targets.forEach((element) => {
-      this.#cancelSettle(element, this.#settles.get(element));
+      this.#cancelSettle(element);
 
       const finish = () => {
-        this.#cancelSettle(element, this.#settles.get(element));
+        this.#cancelSettle(element);
         element.classList.toggle(DONE_CLASS, revealed);
       };
 
-      const plan = transitionPlan(element);
-      if (plan.total <= 0) {
-        finish();
-        return;
-      }
-
-      const handler = (event) => {
-        if (event.target !== element) return;
-        if (plan.property !== "all" && event.propertyName !== plan.property) {
-          return;
-        }
-        finish();
-      };
-
-      element.addEventListener("transitionend", handler);
-      element.addEventListener("transitioncancel", handler);
-      this.#settles.set(element, {
-        handler,
-        finish,
-        timer: setTimeout(finish, plan.total + SETTLE_SLACK),
-      });
+      // null means there was no transition to wait for and finish already ran,
+      // so there is nothing left to cancel. `finish` is kept alongside the
+      // cancel so a teardown can pay the settle off rather than drop it.
+      const cancel = whenSettled(element, finish);
+      if (cancel) this.#settles.set(element, { cancel, finish });
     });
   }
 
-  #cancelSettle(element, settle) {
+  #cancelSettle(element) {
+    const settle = this.#settles.get(element);
     if (!settle) return;
-    clearTimeout(settle.timer);
-    element.removeEventListener("transitionend", settle.handler);
-    element.removeEventListener("transitioncancel", settle.handler);
     this.#settles.delete(element);
+    settle.cancel();
   }
 
   #teardownObservers() {
