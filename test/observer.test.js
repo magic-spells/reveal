@@ -258,6 +258,35 @@ describe("reveal against a stubbed IntersectionObserver", () => {
     handle.destroy();
   });
 
+  it("keeps a batch in document order when a target has been detached", () => {
+    const ids = Array.from({ length: 12 }, (_, index) => `n${index}`);
+    document.body.innerHTML = ids.map((id) => `<i id="${id}"></i>`).join("");
+    const elements = ids.map((id) => document.getElementById(id));
+    elements.forEach((element, index) => place(element, { top: 5000 + index }));
+
+    // removed between the intersection being computed and its delivery, so it
+    // has no position to compare against anything
+    const gone = document.getElementById("n10");
+    gone.remove();
+
+    const seen = [];
+    const handle = observeCross(elements, {
+      offset: 0,
+      onCross: (element) => seen.push(element.id),
+    });
+
+    elements.forEach((element, index) => place(element, { top: 100 + index }));
+    // arriving thoroughly out of order, with the orphan in the middle
+    const scrambled = [...elements].reverse();
+    FakeObserver.watching(elements[0])[0].fire(scrambled);
+
+    // whatever happens to the orphan, the rest are still left to right
+    expect(seen.filter((id) => id !== "n10")).toEqual(
+      ids.filter((id) => id !== "n10"),
+    );
+    handle.destroy();
+  });
+
   it("clears a reveal a rebuild would otherwise strand", () => {
     document.body.innerHTML = `<div id="card" class="reveal reveal-fade-up" data-reveal-once="false"></div>`;
     const card = document.getElementById("card");
@@ -491,7 +520,7 @@ describe("stagger groups", () => {
     expect(delay(b)).toBe("");
   });
 
-  it("keeps staggering the rest when one group value is unusable", () => {
+  it("leaves a nameless group value out of the group", () => {
     const [a, b, c] = row((id) =>
       id === "a" ? `data-reveal-group=":50"` : `data-reveal-group="row:50"`,
     );
@@ -502,6 +531,146 @@ describe("stagger groups", () => {
     // the nameless one is simply not in a group
     expect(delay(a)).toBe("");
     expect([delay(b), delay(c)]).toEqual(["0ms", "50ms"]);
+  });
+
+  it("keeps staggering the rest when one member cannot be registered", () => {
+    const [a, b, c] = row(() => `data-reveal-group="row:50"`);
+
+    // Whatever the malformed element is - here reading its own attributes
+    // throws - it must not take the cascade down with it
+    b.getAttribute = () => {
+      throw new Error("element exploded");
+    };
+
+    Reveal.init({ offset: 120 });
+
+    expect(console.warn).toHaveBeenCalled();
+    // the broken one was skipped entirely, never armed and never revealed
+    expect(revealed(b)).toBe(false);
+    expect(delay(b)).toBe("");
+    // and the rest still cascade, counting only themselves
+    expect([revealed(a), revealed(c)]).toEqual([true, true]);
+    expect([delay(a), delay(c)]).toEqual(["0ms", "50ms"]);
+  });
+
+  it("takes a declared zero step as an explicit no-stagger", () => {
+    const [a, b, c] = row((id) =>
+      // first-wins: the zero comes first, so the 200 never applies
+      id === "a" ? `data-reveal-group="row:0"` : `data-reveal-group="row:200"`,
+    );
+
+    Reveal.init({ offset: 120 });
+
+    expect([a, b, c].every(revealed)).toBe(true);
+    expect([delay(a), delay(b), delay(c)]).toEqual(["0ms", "0ms", "0ms"]);
+  });
+
+  it("keeps a wave open across a microtask, and closes it on a task", async () => {
+    const [a, b, c] = row(() => `data-reveal-group="row:50"`, 5000);
+
+    Reveal.init({ offset: 120 });
+    expect([a, b, c].some(revealed)).toBe(false);
+
+    // Two observer callbacks for one scroll position: a microtask checkpoint
+    // falls between them, and they still describe the same arrival
+    [a, b, c].forEach((element) => place(element, { top: 100 }));
+    FakeObserver.watching(a)[0].fire([a]);
+    await Promise.resolve();
+    FakeObserver.watching(b)[0].fire([b]);
+
+    expect([delay(a), delay(b)]).toEqual(["0ms", "50ms"]);
+
+    // a task boundary is the first point at which nothing more can belong
+    await nextWave();
+    FakeObserver.watching(c)[0].fire([c]);
+
+    expect(delay(c)).toBe("0ms");
+  });
+
+  it("restarts the count on a rebuild, ignoring members already revealed", () => {
+    const [a, b, c] = row(() => `data-reveal-group="row:50"`);
+
+    Reveal.init({ offset: 120 });
+    expect([delay(a), delay(b), delay(c)]).toEqual(["0ms", "50ms", "100ms"]);
+
+    // more of the same list arrives, and the rebuild re-announces the three
+    // that are already on screen
+    document.body.insertAdjacentHTML(
+      "beforeend",
+      `<div id="d" class="reveal reveal-fade-up" data-reveal-group="row:50"></div>
+       <div id="e" class="reveal reveal-fade-up" data-reveal-group="row:50"></div>`,
+    );
+    const [d, e] = ["d", "e"].map((id) => document.getElementById(id));
+    [d, e].forEach((element) => place(element, { top: 200 }));
+
+    Reveal.refreshHard();
+
+    // the new pair is a wave of its own, not items four and five
+    expect([revealed(d), revealed(e)]).toEqual([true, true]);
+    expect([delay(d), delay(e)]).toEqual(["0ms", "50ms"]);
+    // and the ones already revealed keep the delay they animated with
+    expect([delay(a), delay(b), delay(c)]).toEqual(["0ms", "50ms", "100ms"]);
+  });
+
+  it("restarts the count across a destroy and re-init", () => {
+    const [a, b, c] = row(() => `data-reveal-group="row:50"`);
+
+    Reveal.init({ offset: 120 });
+    expect([delay(a), delay(b), delay(c)]).toEqual(["0ms", "50ms", "100ms"]);
+
+    Reveal.destroy();
+
+    document.body.insertAdjacentHTML(
+      "beforeend",
+      `<div id="d" class="reveal reveal-fade-up" data-reveal-group="row:50"></div>`,
+    );
+    const d = document.getElementById("d");
+    place(d, { top: 200 });
+
+    Reveal.init({ offset: 120 });
+
+    // the re-init announces a, b and c all over again - none of them may
+    // consume an index and push the one genuinely new arrival down the wave
+    expect(revealed(d)).toBe(true);
+    expect(delay(d)).toBe("0ms");
+  });
+
+  it("leaves an author's own inline delay alone on the way out", () => {
+    // a step-less group: the controller never writes a delay here, so it has
+    // none of its own to remove
+    document.body.innerHTML = `
+      <div id="a" class="reveal reveal-fade-up" data-reveal-group="row"
+           data-reveal-once="false" style="--reveal-delay: 300ms"></div>`;
+    const a = document.getElementById("a");
+    place(a, { top: 200 });
+
+    Reveal.init({ offset: 120 });
+    expect(revealed(a)).toBe(true);
+    expect(delay(a)).toBe("300ms");
+
+    place(a, { top: 5000 });
+    FakeObserver.watching(a).forEach((observer) => observer.fire([a], false));
+
+    expect(revealed(a)).toBe(false);
+    expect(delay(a)).toBe("300ms");
+  });
+
+  it("leaves an author's own inline delay alone when a rebuild strands it", () => {
+    document.body.innerHTML = `
+      <div id="a" class="reveal reveal-fade-up" data-reveal-group="row"
+           data-reveal-once="false" style="--reveal-delay: 300ms"></div>`;
+    const a = document.getElementById("a");
+    place(a, { top: 200 });
+
+    Reveal.init({ offset: 120 });
+    expect(delay(a)).toBe("300ms");
+
+    // the same exit, reached through #reconcile instead of a callback
+    place(a, { top: 5000 });
+    Reveal.refreshHard();
+
+    expect(revealed(a)).toBe(false);
+    expect(delay(a)).toBe("300ms");
   });
 });
 

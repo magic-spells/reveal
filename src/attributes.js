@@ -34,12 +34,18 @@ export function parseOffset(raw, fallback) {
  * Parse a stagger group
  *
  * `name` on its own groups elements without staggering them; `name:step` also
- * declares the step, in milliseconds, between members revealed together. The
- * split is on the **last** colon, so `:` is reserved - a name containing one
- * keeps only the part before the last.
+ * declares the step, in milliseconds, between members revealed together. A step
+ * of `0` is a real declaration - "these arrive together" - and not the same as
+ * declaring nothing.
  *
- * Forgiving like the other parsers: an empty, unparseable, or negative step is
- * simply absent, and a value with no name at all is no group.
+ * The step is read from the tail after the **last** colon, and only when that
+ * tail actually parses as one. When it does not, the colon belongs to the name
+ * and the **whole** value is the name: `cards:hero` has to land in the same
+ * group as `cards:hero:75`, not in one called `cards`. A trailing colon is the
+ * exception - `row:` is a step the author left out of `row`, not a name.
+ *
+ * Forgiving like the other parsers: an unparseable or negative step is simply
+ * part of the name, and a step with no name in front of it is no group.
  *
  * @param {string|null} raw - Attribute value
  * @returns {{name: string, step: number|null}|null} The group, or null when
@@ -55,14 +61,18 @@ export function parseGroup(raw) {
   if (split === -1) return { name: value, step: null };
 
   const name = value.slice(0, split).trim();
-  // ":50" names nothing, so there is no group to put anything in
-  if (name === "") return null;
-
   const rawStep = value.slice(split + 1).trim();
-  if (rawStep === "") return { name, step: null };
+
+  // "row:" is "row" with the step left out - a template rendering an empty
+  // value must not land its elements in a group of their own
+  if (rawStep === "") return name === "" ? null : { name, step: null };
 
   const step = Number.parseFloat(rawStep);
-  if (!Number.isFinite(step) || step < 0) return { name, step: null };
+  // Not a step, so the colon is part of the name and none of it is a suffix
+  if (!Number.isFinite(step) || step < 0) return { name: value, step: null };
+
+  // ":50" names nothing, so there is no group to put anything in
+  if (name === "") return null;
 
   return { name, step };
 }

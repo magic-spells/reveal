@@ -157,6 +157,19 @@ leave `bottom-bottom` aimed at a stale height.
 - **`reveal-done` is timed per target, not per trigger.** An anchor says nothing about the
   duration or delay of the elements anchored to it, so reveal runs its own settle per element
   (using the exported `transitionPlan`) before releasing the transition shorthand.
+- **Only a real state change acts.** `#setRevealed()` filters its targets against `#revealed`
+  before doing anything, because a rebuild re-announces every crossing from "not crossed".
+  Acting on those would restart settles, rewrite `--reveal-delay` mid-transition, and let
+  revealed elements claim indices in a wave they are not part of. `#revealed` and `#staggered`
+  are WeakSets that deliberately survive `#teardown()` and `destroy()` - exactly as the classes
+  and inline values they describe do.
+- **A stagger wave is a task, and a rebuild ends it.** `#stagger()` numbers the members
+  arriving together, and `#openWave()` holds the batch open on a `setTimeout(0)` - a microtask
+  would close it between two observer callbacks describing one crossing. `#rebuild()` calls
+  `#endWave()` so appended content starts a fresh cascade at `0ms`. The controller removes an
+  inline delay on the way out only when `#staggered` says it wrote one, so a step-less group
+  never eats an author's own `--reveal-delay`. A declared step of `0` is a real step
+  (`step === undefined` is the absent check, never `!step`).
 
 ## Verifying
 

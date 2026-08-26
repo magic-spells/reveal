@@ -256,6 +256,14 @@ function transitionPlan(element) {
  * care is a consumer counting the elements a batch reveals: staggering a row of
  * siblings only reads as a cascade if the callbacks come left to right.
  *
+ * Anything without a comparable position - a target detached between the
+ * intersection and its delivery, or one living in a different tree - is
+ * partitioned out rather than compared. A comparator that answers "equal" for
+ * pairs it cannot place is not an ordering at all, and TimSort is entitled to
+ * scramble the whole batch off one such pair; the ones it can place stay
+ * exactly as ordered as they were, and the rest keep their arrival order behind
+ * them.
+ *
  * @param {IntersectionObserverEntry[]} entries
  * @returns {IntersectionObserverEntry[]} A sorted copy, or the batch untouched
  * when there is nothing to sort
@@ -263,13 +271,34 @@ function transitionPlan(element) {
 function inDocumentOrder(entries) {
   if (!entries || entries.length < 2) return entries;
 
-  return Array.prototype.slice.call(entries).sort((a, b) => {
-    if (!a.target || !b.target || a.target === b.target) return 0;
-    const relation = a.target.compareDocumentPosition(b.target);
-    // A detached node has no position to compare, so it keeps its place
-    if (relation & 1) return 0;
-    return relation & 4 ? -1 : 1;
+  const batch = Array.prototype.slice.call(entries);
+  const rooted = batch.find(
+    (entry) => entry.target && entry.target.isConnected,
+  );
+  if (!rooted) return batch;
+
+  const tree = rooted.target.getRootNode
+    ? rooted.target.getRootNode()
+    : document;
+
+  const placeable = [];
+  const rest = [];
+  batch.forEach((entry) => {
+    const target = entry.target;
+    const comparable =
+      target &&
+      target.isConnected &&
+      (!target.getRootNode || target.getRootNode() === tree);
+    (comparable ? placeable : rest).push(entry);
   });
+
+  placeable.sort((a, b) => {
+    if (a.target === b.target) return 0;
+    // Both are in the same tree, so the relation is always a real one
+    return a.target.compareDocumentPosition(b.target) & 4 ? -1 : 1;
+  });
+
+  return placeable.concat(rest);
 }
 
 /**
@@ -939,12 +968,18 @@ function parseOffset(raw, fallback) {
  * Parse a stagger group
  *
  * `name` on its own groups elements without staggering them; `name:step` also
- * declares the step, in milliseconds, between members revealed together. The
- * split is on the **last** colon, so `:` is reserved - a name containing one
- * keeps only the part before the last.
+ * declares the step, in milliseconds, between members revealed together. A step
+ * of `0` is a real declaration - "these arrive together" - and not the same as
+ * declaring nothing.
  *
- * Forgiving like the other parsers: an empty, unparseable, or negative step is
- * simply absent, and a value with no name at all is no group.
+ * The step is read from the tail after the **last** colon, and only when that
+ * tail actually parses as one. When it does not, the colon belongs to the name
+ * and the **whole** value is the name: `cards:hero` has to land in the same
+ * group as `cards:hero:75`, not in one called `cards`. A trailing colon is the
+ * exception - `row:` is a step the author left out of `row`, not a name.
+ *
+ * Forgiving like the other parsers: an unparseable or negative step is simply
+ * part of the name, and a step with no name in front of it is no group.
  *
  * @param {string|null} raw - Attribute value
  * @returns {{name: string, step: number|null}|null} The group, or null when
@@ -960,14 +995,18 @@ function parseGroup(raw) {
   if (split === -1) return { name: value, step: null };
 
   const name = value.slice(0, split).trim();
-  // ":50" names nothing, so there is no group to put anything in
-  if (name === "") return null;
-
   const rawStep = value.slice(split + 1).trim();
-  if (rawStep === "") return { name, step: null };
+
+  // "row:" is "row" with the step left out - a template rendering an empty
+  // value must not land its elements in a group of their own
+  if (rawStep === "") return name === "" ? null : { name, step: null };
 
   const step = Number.parseFloat(rawStep);
-  if (!Number.isFinite(step) || step < 0) return { name, step: null };
+  // Not a step, so the colon is part of the name and none of it is a suffix
+  if (!Number.isFinite(step) || step < 0) return { name: value, step: null };
+
+  // ":50" names nothing, so there is no group to put anything in
+  if (name === "") return null;
 
   return { name, step };
 }
@@ -1051,6 +1090,12 @@ class RevealController {
   #settles = new Map();
   #groupNames = new Map();
   #groupSteps = new Map();
+  // What the controller believes it has revealed, and whose inline delay it
+  // wrote. Both outlive a rebuild - and a destroy() - exactly as the classes
+  // and the inline values they describe do, so a fresh observer re-announcing
+  // an old reveal is recognisable as the no-op it is.
+  #revealed = new WeakSet();
+  #staggered = new WeakSet();
   #wave = new Map();
   #waveTimer = null;
   #initialized = false;
@@ -1183,6 +1228,11 @@ class RevealController {
    * swap #groups out from under the loop still building into it, orphaning
    * every observer created after that point, so nested calls just mark the
    * pass dirty and let the outer one run again.
+   *
+   * A rebuild also ends the open wave. Fresh observers announce the whole page
+   * from "not crossed", which is a new arrival as far as the stagger is
+   * concerned - so the count has to start over, or content appended just after
+   * a cascade would wait out a delay for members that are already on screen.
    */
   #rebuild() {
     if (this.#rebuilding) {
@@ -1192,6 +1242,7 @@ class RevealController {
 
     this.#rebuilding = true;
     try {
+      this.#endWave();
       this.#teardownObservers();
       this.#collect();
       this.#arm();
@@ -1413,11 +1464,12 @@ class RevealController {
   /**
    * Stagger the grouped elements in this batch, before they are revealed
    *
-   * Delays are batch-relative, not index-relative: the members revealed
-   * together get 0, step, 2*step, and the next wave starts from zero again. A
-   * list taller than the viewport therefore cascades once per wave instead of
-   * accumulating a delay nobody would sit through, and an element that arrives
-   * on its own arrives immediately.
+   * Only elements actually arriving are passed in. Delays are batch-relative,
+   * not index-relative: the members revealed together get 0, step, 2*step, and
+   * the next wave starts from zero again. A list taller than the viewport
+   * therefore cascades once per wave instead of accumulating a delay nobody
+   * would sit through, and an element that arrives on its own arrives
+   * immediately.
    *
    * The value is written as an inline `--reveal-delay`, which is the documented
    * escape hatch for a computed timing value - it feeds the same custom
@@ -1430,8 +1482,10 @@ class RevealController {
 
       const step = this.#groupSteps.get(name);
       // A group with no step declared anywhere is still a group, it just has
-      // nothing to say about timing - so the element's own classes stand.
-      if (!step) return;
+      // nothing to say about timing - so the element's own classes stand. A
+      // declared `0` is not that: it says the members arrive together, and it
+      // still overrides their classes.
+      if (step === undefined) return;
 
       let members = this.#wave.get(name);
       if (!members) {
@@ -1446,6 +1500,7 @@ class RevealController {
       }
 
       element.style.setProperty(DELAY_PROPERTY, `${index * step}ms`);
+      this.#staggered.add(element);
       this.#openWave();
     });
   }
@@ -1505,36 +1560,55 @@ class RevealController {
 
     group.byTrigger.forEach((targets, trigger) => {
       if (group.observer.crossed(trigger)) return;
-      if (
-        !targets.some((element) => element.classList.contains(REVEALED_CLASS))
-      ) {
-        return;
-      }
+      if (!targets.some((element) => this.#revealed.has(element))) return;
       this.#setRevealed(group, trigger, false);
     });
   }
 
+  /**
+   * Move a trigger's targets into (or out of) the revealed state
+   *
+   * Only elements whose state actually changes take part. Every rebuild hands
+   * its observers back at "not crossed" and then announces the crossings again,
+   * so an already-revealed element is re-announced routinely - and acting on
+   * that would restart its settle, rewrite `--reveal-delay` under a transition
+   * already in flight, and let it claim a place in a wave it is not part of.
+   */
   #setRevealed(group, trigger, revealed) {
     const targets = group.byTrigger.get(trigger);
     if (!targets) return;
 
+    const changed = targets.filter(
+      (element) => this.#revealed.has(element) !== revealed,
+    );
+    if (changed.length === 0) return;
+
     // Before the class, and in the same synchronous pass, or the transition
     // starts against the delay the element was already carrying
-    if (revealed) this.#stagger(targets);
+    if (revealed) this.#stagger(changed);
 
-    targets.forEach((element) => {
+    changed.forEach((element) => {
+      if (revealed) {
+        this.#revealed.add(element);
+      } else {
+        this.#revealed.delete(element);
+      }
+
       element.classList.toggle(REVEALED_CLASS, revealed);
       if (revealed) return;
 
       // The reveal transition has to be in force again on the way out
       element.classList.remove(DONE_CLASS);
-      // Hiding is not staggered - the next wave hands out its own delays
-      if (this.#groupNames.has(element)) {
+      // Hiding is not staggered - the next wave hands out its own delays. Only
+      // a value this controller wrote is dropped: a step-less group leaves the
+      // author's own inline `--reveal-delay` alone, on the way out as on the
+      // way in.
+      if (this.#staggered.delete(element)) {
         element.style.removeProperty(DELAY_PROPERTY);
       }
     });
 
-    this.#settleTargets(targets, revealed);
+    this.#settleTargets(changed, revealed);
   }
 
   /**

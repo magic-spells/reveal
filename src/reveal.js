@@ -70,6 +70,12 @@ class RevealController {
   #settles = new Map();
   #groupNames = new Map();
   #groupSteps = new Map();
+  // What the controller believes it has revealed, and whose inline delay it
+  // wrote. Both outlive a rebuild - and a destroy() - exactly as the classes
+  // and the inline values they describe do, so a fresh observer re-announcing
+  // an old reveal is recognisable as the no-op it is.
+  #revealed = new WeakSet();
+  #staggered = new WeakSet();
   #wave = new Map();
   #waveTimer = null;
   #initialized = false;
@@ -202,6 +208,11 @@ class RevealController {
    * swap #groups out from under the loop still building into it, orphaning
    * every observer created after that point, so nested calls just mark the
    * pass dirty and let the outer one run again.
+   *
+   * A rebuild also ends the open wave. Fresh observers announce the whole page
+   * from "not crossed", which is a new arrival as far as the stagger is
+   * concerned - so the count has to start over, or content appended just after
+   * a cascade would wait out a delay for members that are already on screen.
    */
   #rebuild() {
     if (this.#rebuilding) {
@@ -211,6 +222,7 @@ class RevealController {
 
     this.#rebuilding = true;
     try {
+      this.#endWave();
       this.#teardownObservers();
       this.#collect();
       this.#arm();
@@ -432,11 +444,12 @@ class RevealController {
   /**
    * Stagger the grouped elements in this batch, before they are revealed
    *
-   * Delays are batch-relative, not index-relative: the members revealed
-   * together get 0, step, 2*step, and the next wave starts from zero again. A
-   * list taller than the viewport therefore cascades once per wave instead of
-   * accumulating a delay nobody would sit through, and an element that arrives
-   * on its own arrives immediately.
+   * Only elements actually arriving are passed in. Delays are batch-relative,
+   * not index-relative: the members revealed together get 0, step, 2*step, and
+   * the next wave starts from zero again. A list taller than the viewport
+   * therefore cascades once per wave instead of accumulating a delay nobody
+   * would sit through, and an element that arrives on its own arrives
+   * immediately.
    *
    * The value is written as an inline `--reveal-delay`, which is the documented
    * escape hatch for a computed timing value - it feeds the same custom
@@ -449,8 +462,10 @@ class RevealController {
 
       const step = this.#groupSteps.get(name);
       // A group with no step declared anywhere is still a group, it just has
-      // nothing to say about timing - so the element's own classes stand.
-      if (!step) return;
+      // nothing to say about timing - so the element's own classes stand. A
+      // declared `0` is not that: it says the members arrive together, and it
+      // still overrides their classes.
+      if (step === undefined) return;
 
       let members = this.#wave.get(name);
       if (!members) {
@@ -465,6 +480,7 @@ class RevealController {
       }
 
       element.style.setProperty(DELAY_PROPERTY, `${index * step}ms`);
+      this.#staggered.add(element);
       this.#openWave();
     });
   }
@@ -524,36 +540,55 @@ class RevealController {
 
     group.byTrigger.forEach((targets, trigger) => {
       if (group.observer.crossed(trigger)) return;
-      if (
-        !targets.some((element) => element.classList.contains(REVEALED_CLASS))
-      ) {
-        return;
-      }
+      if (!targets.some((element) => this.#revealed.has(element))) return;
       this.#setRevealed(group, trigger, false);
     });
   }
 
+  /**
+   * Move a trigger's targets into (or out of) the revealed state
+   *
+   * Only elements whose state actually changes take part. Every rebuild hands
+   * its observers back at "not crossed" and then announces the crossings again,
+   * so an already-revealed element is re-announced routinely - and acting on
+   * that would restart its settle, rewrite `--reveal-delay` under a transition
+   * already in flight, and let it claim a place in a wave it is not part of.
+   */
   #setRevealed(group, trigger, revealed) {
     const targets = group.byTrigger.get(trigger);
     if (!targets) return;
 
+    const changed = targets.filter(
+      (element) => this.#revealed.has(element) !== revealed,
+    );
+    if (changed.length === 0) return;
+
     // Before the class, and in the same synchronous pass, or the transition
     // starts against the delay the element was already carrying
-    if (revealed) this.#stagger(targets);
+    if (revealed) this.#stagger(changed);
 
-    targets.forEach((element) => {
+    changed.forEach((element) => {
+      if (revealed) {
+        this.#revealed.add(element);
+      } else {
+        this.#revealed.delete(element);
+      }
+
       element.classList.toggle(REVEALED_CLASS, revealed);
       if (revealed) return;
 
       // The reveal transition has to be in force again on the way out
       element.classList.remove(DONE_CLASS);
-      // Hiding is not staggered - the next wave hands out its own delays
-      if (this.#groupNames.has(element)) {
+      // Hiding is not staggered - the next wave hands out its own delays. Only
+      // a value this controller wrote is dropped: a step-less group leaves the
+      // author's own inline `--reveal-delay` alone, on the way out as on the
+      // way in.
+      if (this.#staggered.delete(element)) {
         element.style.removeProperty(DELAY_PROPERTY);
       }
     });
 
-    this.#settleTargets(targets, revealed);
+    this.#settleTargets(changed, revealed);
   }
 
   /**
