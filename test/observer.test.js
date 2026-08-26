@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Reveal, { observeCross } from "../src/reveal.js";
+import { whenSettled } from "../src/observe-cross.js";
 
 /**
  * A stand-in for IntersectionObserver that records what it is watching and
@@ -120,6 +121,7 @@ describe("reveal against a stubbed IntersectionObserver", () => {
 
   afterEach(() => {
     Reveal.destroy();
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -179,8 +181,11 @@ describe("reveal against a stubbed IntersectionObserver", () => {
   });
 
   it("waits for a boxless element to gain a layout box", () => {
-    document.body.innerHTML = `<div id="hidden" class="reveal reveal-fade-up"></div>`;
+    document.body.innerHTML = `
+      <div id="hidden" class="reveal reveal-fade-up"></div>
+      <div id="below" class="reveal reveal-fade-up"></div>`;
     const hidden = document.getElementById("hidden");
+    const below = document.getElementById("below");
     // display:none reports zeros for everything
     place(hidden, { top: 0, height: 0, width: 0, parent: null });
     hidden.getBoundingClientRect = () => ({
@@ -193,12 +198,23 @@ describe("reveal against a stubbed IntersectionObserver", () => {
       x: 0,
       y: 0,
     });
+    // measurable, and far below its line: promoted, and staying that way
+    place(below, { top: 5000 });
 
     Reveal.init({ offset: 120 });
     expect(revealed(hidden)).toBe(false);
 
     const watchers = FakeObserver.watching(hidden);
     expect(watchers.length).toBeGreaterThan(0);
+
+    // Nothing has measured `hidden`, so the observer holding it is the pre-arm
+    // one - and `below`, which has been promoted off it, must be watched by its
+    // real observer and by nothing else. `#arm` -> `#unobserve` is the only
+    // thing that takes a promoted element off the pre-arm stage.
+    const prearm = watchers[0];
+    const promoted = FakeObserver.watching(below);
+    expect(promoted).toHaveLength(1);
+    expect(promoted[0]).not.toBe(prearm);
 
     // it opens: now it has a box, well above the trigger line
     place(hidden, { top: 100 });
@@ -361,6 +377,175 @@ describe("reveal against a stubbed IntersectionObserver", () => {
     Reveal.init({ offset: 120 });
 
     expect(revealed(inner)).toBe(true);
+  });
+
+  it("starts no settle on an instance its own callback just destroyed", () => {
+    document.body.innerHTML = `<i id="card"></i>`;
+    const card = document.getElementById("card");
+    place(card, { top: 5000 });
+
+    vi.spyOn(globalThis, "getComputedStyle").mockImplementation(() => ({
+      overflow: "visible",
+      overflowX: "visible",
+      overflowY: "visible",
+      transitionProperty: "transform",
+      transitionDuration: "300ms",
+      transitionDelay: "0ms",
+    }));
+
+    const added = vi.spyOn(card, "addEventListener");
+    const removed = vi.spyOn(card, "removeEventListener");
+    const transitionCalls = (spy) =>
+      spy.mock.calls.filter(([type]) => type.startsWith("transition")).length;
+
+    let handle;
+    handle = observeCross([card], {
+      offset: 0,
+      // a consumer tearing down from inside onCross - control comes straight
+      // back into #evaluate, which goes on to settle
+      onCross: () => handle.destroy(),
+    });
+
+    place(card, { top: 100 });
+    FakeObserver.watching(card)[0].fire([card]);
+
+    // `finish` bails on a destroyed instance, so a wait started here would be
+    // one nothing ever takes back off
+    expect(transitionCalls(added)).toBe(0);
+    expect(transitionCalls(removed)).toBe(0);
+  });
+
+  it("takes its settle listeners back off when the transition ends", () => {
+    document.body.innerHTML = `<i id="card"></i>`;
+    const card = document.getElementById("card");
+    place(card, { top: 5000 });
+
+    // jsdom computes no transition at all, so a settle would finish in the
+    // same tick and never listen for anything
+    vi.spyOn(globalThis, "getComputedStyle").mockImplementation(() => ({
+      overflow: "visible",
+      overflowX: "visible",
+      overflowY: "visible",
+      transitionProperty: "transform",
+      transitionDuration: "300ms",
+      transitionDelay: "0ms",
+    }));
+
+    const added = vi.spyOn(card, "addEventListener");
+    const removed = vi.spyOn(card, "removeEventListener");
+    const transitionCalls = (spy) =>
+      spy.mock.calls.filter(([type]) => type.startsWith("transition")).length;
+
+    const handle = observeCross([card], { offset: 0, once: false });
+
+    place(card, { top: 100 });
+    FakeObserver.watching(card)[0].fire([card]);
+
+    // the crossing started a transition, and the settle is waiting it out
+    expect(transitionCalls(added)).toBe(2);
+    expect(transitionCalls(removed)).toBe(0);
+
+    const event = new Event("transitionend");
+    Object.defineProperty(event, "propertyName", { value: "transform" });
+    card.dispatchEvent(event);
+
+    // every listener the wait put on comes back off with it: a stale one would
+    // still be live during the next crossing's transition, and that one ends on
+    // a different property - so it would cut the settle short and record a
+    // shift measured mid-flight
+    expect(handle.crossed(card)).toBe(true);
+    expect(transitionCalls(removed)).toBe(2);
+
+    card.dispatchEvent(event);
+    expect(transitionCalls(removed)).toBe(2);
+
+    handle.destroy();
+  });
+
+  it("never fires a settle that was cancelled, timer and all", () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = `<i id="card"></i>`;
+    const card = document.getElementById("card");
+
+    // jsdom computes no transition, so give it one worth waiting out
+    vi.spyOn(globalThis, "getComputedStyle").mockImplementation(() => ({
+      transitionProperty: "transform",
+      transitionDuration: "300ms",
+      transitionDelay: "0ms",
+    }));
+
+    const finished = vi.fn();
+    const cancel = whenSettled(card, finished);
+    expect(typeof cancel).toBe("function");
+
+    cancel();
+    vi.advanceTimersByTime(5000);
+
+    // The closure owns the timeout as well as the listeners. A cancelled settle
+    // that still fires re-measures a box the next crossing has already moved,
+    // and writes that shift over a live one.
+    expect(finished).not.toHaveBeenCalled();
+  });
+
+  it("works out a scrolling ancestor once, not again on every wake-up", () => {
+    document.body.innerHTML = `<div id="wrap"><i id="card"></i></div>`;
+    const wrap = document.getElementById("wrap");
+    const card = document.getElementById("card");
+    // No layout box at all, so it never promotes: it stays on the pre-arm
+    // observer and every wake-up runs #evaluate's opening again. That is the
+    // hot path - under syncOnScroll it is once a frame, per element.
+    place(card, { top: 0, height: 0, width: 0, parent: null });
+    card.getBoundingClientRect = () => ({
+      top: 0,
+      bottom: 0,
+      height: 0,
+      left: 0,
+      right: 0,
+      width: 0,
+      x: 0,
+      y: 0,
+    });
+
+    const styles = vi.spyOn(globalThis, "getComputedStyle");
+    const walks = () =>
+      styles.mock.calls.filter(([node]) => node === wrap).length;
+
+    const handle = observeCross([card], { offset: 0 });
+    const prearm = FakeObserver.watching(card)[0];
+
+    prearm.fire([card]);
+    expect(walks()).toBe(1);
+
+    // the walk costs a computed style per ancestor, and nothing about the
+    // element changed between wake-ups
+    prearm.fire([card]);
+    prearm.fire([card]);
+    expect(walks()).toBe(1);
+
+    handle.destroy();
+  });
+
+  it("takes the scrolling-ancestor answer again on refresh", () => {
+    document.body.innerHTML = `
+      <div id="wrap"><div id="card" class="reveal reveal-fade-up"></div></div>`;
+    const wrap = document.getElementById("wrap");
+    const card = document.getElementById("card");
+    // Layout says it is far down the document while the painted box is on
+    // screen - the split only a scrolling ancestor produces.
+    place(card, { top: 9000, shift: -8800 });
+
+    Reveal.init({ offset: 120 });
+    // no scroller yet, so layout geometry rules and the card has not arrived
+    expect(revealed(card)).toBe(false);
+
+    // A breakpoint or a class toggle makes the ancestor a scroller after init.
+    // The answer is kept per wake-up, not for the life of the observers, so a
+    // refresh has to take it again - otherwise a stale `false` denies every
+    // wake-up from here on and the card never reveals at all.
+    wrap.style.overflow = "auto";
+    Reveal.refresh();
+
+    expect(revealed(card)).toBe(true);
   });
 });
 
