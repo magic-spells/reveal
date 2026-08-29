@@ -902,9 +902,10 @@ Reveal.<b>init</b>({ offset: 120, once: true });</pre>
             </div>
             <h2 class="reveal reveal-fade-up">Everything you can write</h2>
             <p class="demo-desc reveal reveal-fade-up reveal-delay-100">
-              Classes control the look, data attributes control the behavior.
-              Each attribute overrides the matching <code>init()</code> option
-              for that element.
+              Everything visual — the marker, the effect, the timing — is a
+              class. The <code>data-reveal-*</code> attributes control behavior
+              only, each overriding the matching <code>init()</code> option for
+              that element.
             </p>
           </div>
 
@@ -912,7 +913,7 @@ Reveal.<b>init</b>({ offset: 120, once: true });</pre>
             <table class="attr-table">
               <thead>
                 <tr>
-                  <th scope="col">Attribute</th>
+                  <th scope="col">Class</th>
                   <th scope="col">Value</th>
                   <th scope="col">What it does</th>
                 </tr>
@@ -988,6 +989,20 @@ Reveal.<b>init</b>({ offset: 120, once: true });</pre>
                     <code>style="--reveal-easing: cubic-bezier(…)"</code>.
                   </td>
                 </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="attr-scroll reveal reveal-fade-up reveal-delay-200">
+            <table class="attr-table">
+              <thead>
+                <tr>
+                  <th scope="col">Attribute</th>
+                  <th scope="col">Value</th>
+                  <th scope="col">What it does</th>
+                </tr>
+              </thead>
+              <tbody>
                 <tr>
                   <td><code>data-reveal-offset</code></td>
                   <td>px or %</td>
@@ -1032,7 +1047,7 @@ Reveal.<b>init</b>({ offset: 120, once: true });</pre>
             </table>
           </div>
 
-          <pre class="code reveal reveal-fade-up reveal-delay-200">
+          <pre class="code reveal reveal-fade-up reveal-delay-250">
 &lt;div class="<b>reveal reveal-fade-up reveal-delay-150 reveal-duration-800 reveal-ease-spring</b>"
      <b>data-reveal-offset</b>="20%" <b>data-reveal-once</b>="false"&gt;
   …
