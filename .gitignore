@@ -24,3 +24,6 @@ Thumbs.db
 *.tgz
 
 ./claude
+
+# Playwright MCP session output
+.playwright-mcp/
