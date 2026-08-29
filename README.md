@@ -94,7 +94,7 @@ Both are opt-in. Neither is needed for the library to work.
 | Zoom out | `zoom-out`, `zoom-out-up`, `zoom-out-down`, `zoom-out-left`, `zoom-out-right` |
 | Bloom | `bloom-in`, `bloom-in-up`, `bloom-in-down`, `bloom-in-left`, `bloom-in-right` |
 
-Each is a class prefixed `reveal-`, next to the `reveal` marker: `class="reveal reveal-zoom-in-up"`. Direction is where the element *goes*, matching AOS - `fade-up` starts below and rises. `slide-*` travels a full width or height and does not fade; `bloom-*` is a zoom that starts blurred and resolves to sharp; everything else fades. A class the stylesheet doesn't know still gets a plain fade, so a typo degrades instead of breaking.
+Each is a **class** prefixed `reveal-` — not a data attribute — written next to the `reveal` marker: `class="reveal reveal-zoom-in-up"`. Direction is where the element *goes*, matching AOS - `fade-up` starts below and rises. `slide-*` travels a full width or height and does not fade; `bloom-*` is a zoom that starts blurred and resolves to sharp; everything else fades. A class the stylesheet doesn't know still gets a plain fade, so a typo degrades instead of breaking.
 
 Custom properties tune them, so you rarely need a new rule:
 
@@ -161,7 +161,7 @@ Behavior — `data-reveal-once`, `data-reveal-anchor`, `data-reveal-offset`, `da
 
 ## Attributes
 
-Classes say what a reveal looks like; data attributes say how the observer treats the element. Each overrides the matching `init()` option for that element alone:
+Classes say what a reveal looks like; data attributes say how the observer treats the element. Everything visual — the `reveal` marker, the effect (`reveal-fade-up`), the timing (`reveal-delay-150`) — is a class; the attributes are only the five `data-reveal-*` below, each overriding the matching `init()` option for that element alone:
 
 | Attribute | Value | Description |
 |-----------|-------|-------------|
